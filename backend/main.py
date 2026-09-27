@@ -3,7 +3,6 @@ from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from typing import Optional, Any, List
 from datetime import date, datetime, timedelta, timezone, time
-    
 import asyncpg
 from fastapi.responses import JSONResponse
 import os
