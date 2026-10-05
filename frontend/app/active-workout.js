@@ -5,6 +5,7 @@ import {
   FlatList,
   Pressable,
   Alert,
+  StyleSheet,
 } from "react-native";
 import { useState, useEffect, useRef } from "react";
 import { router, useNavigation } from "expo-router";
@@ -14,21 +15,17 @@ import { useTrainStore } from "../store/trainStore";
 
 const useElapsedTime = (startedAt) => {
   const [elapsed, setElapsed] = useState(0);
-
   useEffect(() => {
     if (!startedAt) return;
-
     const updateElapsed = () => {
-      const seconds = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
-      setElapsed(seconds);
+      setElapsed(
+        Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+      );
     };
-
     updateElapsed();
     const interval = setInterval(updateElapsed, 1000);
-
     return () => clearInterval(interval);
   }, [startedAt]);
-
   return elapsed;
 };
 
@@ -38,24 +35,27 @@ const formatElapsed = (totalSeconds) => {
   const seconds = totalSeconds % 60;
   const pad = (n) => String(n).padStart(2, "0");
   return hours > 0
-    ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
-    : `${pad(minutes)}:${pad(seconds)}`;
+    ? `${hours}h ${pad(minutes)}min ${pad(seconds)}seg`
+    : `${pad(minutes)}min ${pad(seconds)}seg`;
 };
 
 export default function ActiveWorkout() {
   const activeSession = useTrainStore((state) => state.activeSession);
-  const addSet = useTrainStore((state) => state.addSet);
-  const removeSet = useTrainStore((state) => state.removeSet);
+  const updateSetField = useTrainStore((state) => state.updateSetField);
+  const addRow = useTrainStore((state) => state.addRow);
+  const removeRow = useTrainStore((state) => state.removeRow);
   const clearSession = useTrainStore((state) => state.clearSession);
+  const toggleRowConfirmed = useTrainStore((state) => state.toggleRowConfirmed);
 
-  const [weightInput, setWeightInput] = useState({});
-  const [repsInput, setRepsInput] = useState({});
   const [saving, setSaving] = useState(false);
+
+  const [restRemaining, setRestRemaining] = useState(0);
+  const [restRunning, setRestRunning] = useState(false);
+  const restIntervalRef = useRef(null);
 
   const navigation = useNavigation();
   const savedRef = useRef(false);
 
-  // 👇 acá SÍ se usa como hook, llamándolo con el valor real
   const elapsedSeconds = useElapsedTime(activeSession?.startedAt);
 
   useEffect(() => {
@@ -76,21 +76,35 @@ export default function ActiveWorkout() {
     return unsubscribe;
   }, [navigation, activeSession]);
 
+  useEffect(() => {
+    if (!restRunning) return;
+    restIntervalRef.current = setInterval(() => {
+      setRestRemaining((prev) => {
+        if (prev <= 1) {
+          setRestRunning(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(restIntervalRef.current);
+  }, [restRunning]);
+
   if (!activeSession) {
     return (
-      <View>
-        <Text>No hay ningún entrenamiento activo</Text>
+      <View style={styles.container}>
+        <Text style={styles.text}>No hay ningún entrenamiento activo</Text>
       </View>
     );
   }
 
-  const handleAddSet = (exerciseIndex) => {
-    const weight = parseFloat(weightInput[exerciseIndex]) || 0;
-    const reps = parseInt(repsInput[exerciseIndex], 10) || 0;
-    if (weight <= 0 || reps <= 0) return;
-    addSet(exerciseIndex, weight, reps);
-    setWeightInput((prev) => ({ ...prev, [exerciseIndex]: "" }));
-    setRepsInput((prev) => ({ ...prev, [exerciseIndex]: "" }));
+  const startRestTimer = (seconds) => {
+    setRestRemaining(seconds);
+    setRestRunning(true);
+  };
+
+  const adjustRest = (delta) => {
+    setRestRemaining((prev) => Math.max(0, prev + delta));
   };
 
   const handleFinish = () => {
@@ -124,17 +138,27 @@ export default function ActiveWorkout() {
           exercises: activeSession.exercises.map((ex, index) => ({
             exercise_id: ex.exercise_id,
             order_index: index,
-            sets: ex.sets,
+            sets: ex.rows
+              .filter((row) => row.confirmed)
+              .map((row, i) => ({
+                set_number: i + 1,
+                set_type: "normal",
+                weight: parseFloat(row.weight),
+                reps: parseInt(row.reps, 10),
+              }))
+              .filter((s) => s.weight > 0 && s.reps > 0),
           })),
         }),
       });
 
       const data = await response.json();
+      console.log(data);
       if (!data.success) {
         Alert.alert("Error", data.message);
         return;
       }
       clearSession();
+      savedRef.current = true;
       router.replace("/train");
     } catch (e) {
       Alert.alert("Error", "No se pudo guardar el entrenamiento");
@@ -143,53 +167,213 @@ export default function ActiveWorkout() {
     }
   };
 
+  const formatRest = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
   return (
-    <View>
-      <Text>{activeSession.name}</Text>
-      <Text style={{ fontSize: 24, fontFamily: "Outfit_400Regular" }}>
-        {formatElapsed(elapsedSeconds)}
-      </Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={[styles.text, { fontSize: 32 }]}>
+            {activeSession.name}
+          </Text>
+          <Text style={[styles.text, { fontSize: 14, color: "#868e96" }]}>
+            {formatElapsed(elapsedSeconds)}
+          </Text>
+        </View>
+        <Pressable onPress={handleFinish} style={styles.finishButton}>
+          <Text style={{ color: "#1971c2", fontFamily: "Outfit_400Regular" }}>
+            {saving ? "..." : "Terminar"}
+          </Text>
+        </Pressable>
+      </View>
 
       <FlatList
         data={activeSession.exercises}
         keyExtractor={(item, index) => `${item.exercise_id}-${index}`}
+        contentContainerStyle={{ gap: 25, paddingBottom: 100 }}
+        removeClippedSubviews={false}
+        showsVerticalScrollIndicator={false}
         renderItem={({ item, index }) => (
-          <View>
-            <Text>{item.name}</Text>
+          <View style={styles.exerciseBlock}>
+            <Text style={[styles.text, { fontSize: 30 }]}>{item.name}</Text>
+            <Text style={styles.rest}>Descanso: {item.rest_seconds}seg</Text>
 
-            {item.sets.map((s, setIndex) => (
-              <View key={setIndex} style={{ flexDirection: "row" }}>
-                <Text>Serie {s.set_number}: {s.weight}kg x {s.reps}</Text>
-                <Pressable onPress={() => removeSet(index, setIndex)}>
-                  <Text>Eliminar</Text>
+            <View style={styles.tableHeader}>
+              <Text style={styles.headerCell}>Serie</Text>
+              <Text style={styles.headerCell}>Kg</Text>
+              <Text style={styles.headerCell}>Reps</Text>
+              <Text style={styles.headerCell}>check</Text>
+            </View>
+
+            {item.rows.map((row, rowIndex) => (
+              <View
+                key={rowIndex}
+                style={[
+                  styles.row,
+                  row.confirmed ? { backgroundColor: "#b2f2bb" } : null,
+                ]}
+              >
+                <Text style={[styles.cell, { width: 40 }]}>{rowIndex + 1}</Text>
+                <TextInput
+                  keyboardType="numeric"
+                  placeholder="--"
+                  value={row.weight}
+                  onChangeText={(v) =>
+                    updateSetField(index, rowIndex, "weight", v)
+                  }
+                  style={styles.input}
+                />
+                <TextInput
+                  keyboardType="numeric"
+                  placeholder="--"
+                  value={row.reps}
+                  onChangeText={(v) =>
+                    updateSetField(index, rowIndex, "reps", v)
+                  }
+                  style={styles.input}
+                />
+                <Pressable
+                  onPress={() => {
+                    if (!row.confirmed && (!row.weight || !row.reps)) return;
+                    toggleRowConfirmed(index, rowIndex);
+                    if (!row.confirmed) {
+                      startRestTimer(item.rest_seconds || 90);
+                    }
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: row.confirmed ? "#2f9e44" : "#868e96",
+                      fontSize: 16,
+                    }}
+                  >
+                    ✓
+                  </Text>
+                </Pressable>
+                <Pressable onPress={() => removeRow(index, rowIndex)}>
+                  <Text style={{ color: "#e03131", fontSize: 16 }}>✕</Text>
                 </Pressable>
               </View>
             ))}
 
-            <View style={{ flexDirection: "row" }}>
-              <TextInput
-                placeholder="kg"
-                keyboardType="numeric"
-                value={weightInput[index] || ""}
-                onChangeText={(v) => setWeightInput((prev) => ({ ...prev, [index]: v }))}
-              />
-              <TextInput
-                placeholder="reps"
-                keyboardType="numeric"
-                value={repsInput[index] || ""}
-                onChangeText={(v) => setRepsInput((prev) => ({ ...prev, [index]: v }))}
-              />
-              <Pressable onPress={() => handleAddSet(index)}>
-                <Text>+ Serie</Text>
-              </Pressable>
-            </View>
+            <Pressable
+              onPress={() => addRow(index)}
+              style={styles.addSetButton}
+            >
+              <Text style={{ color: "#2f9e44" }}>Añadir serie</Text>
+            </Pressable>
           </View>
         )}
       />
 
-      <Pressable onPress={handleFinish}>
-        <Text>{saving ? "Guardando..." : "Finalizar entrenamiento"}</Text>
-      </Pressable>
+      {restRunning && (
+        <View style={styles.restBar}>
+          <Pressable onPress={() => adjustRest(-10)}>
+            <Text style={styles.restAdjust}>-10</Text>
+          </Pressable>
+          <Text style={[styles.text, { fontSize: 20 }]}>
+            {formatRest(restRemaining)}
+          </Text>
+          <Pressable onPress={() => adjustRest(10)}>
+            <Text style={styles.restAdjust}>+10</Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    paddingHorizontal: 15,
+    paddingTop: 20,
+  },
+  text: {
+    fontFamily: "Outfit_400Regular",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 10,
+  },
+  finishButton: {
+    borderWidth: 2,
+    borderColor: "#1971c2",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  exerciseBlock: { gap: 6 },
+  rest: {
+    fontFamily: "Outfit_400Regular",
+    color: "#1971c2",
+    fontSize: 13,
+  },
+  tableHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 8,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e9ecef",
+  },
+  headerCell: {
+    fontFamily: "Outfit_400Regular",
+    color: "#868e96",
+    fontSize: 13,
+    width: 60,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+  },
+  cell: {
+    fontFamily: "Outfit_400Regular",
+    fontSize: 15,
+  },
+  input: {
+    width: 60,
+    borderWidth: 1,
+    borderColor: "#ced4da",
+    borderRadius: 6,
+    padding: 5,
+    textAlign: "center",
+    fontFamily: "Outfit_400Regular",
+  },
+  addSetButton: {
+    borderWidth: 2,
+    borderColor: "#2f9e44",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  restBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingVertical: 10,
+    marginBottom: 10,
+    backgroundColor: "#e9ecef",
+    borderRadius: 10,
+  },
+  restAdjust: {
+    fontFamily: "Outfit_400Regular",
+    color: "#1971c2",
+    fontSize: 16,
+  },
+});

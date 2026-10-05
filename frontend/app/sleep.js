@@ -76,9 +76,18 @@ export default function Sleep() {
           <Pressable
             key={n}
             onPress={() => setQuality(n)}
-            style={[styles.qualityButton, quality === n && styles.qualitySelected]}
+            style={[
+              styles.qualityButton,
+              quality === n && styles.qualitySelected,
+            ]}
           >
-            <Text style={quality === n ? styles.qualityTextSelected : styles.qualityText}>{n}</Text>
+            <Text
+              style={
+                quality === n ? styles.qualityTextSelected : styles.qualityText
+              }
+            >
+              {n}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -95,30 +104,67 @@ export default function Sleep() {
       {error ? <Text style={{ color: "#e03131" }}>{error}</Text> : null}
 
       <Pressable onPress={handleSave} style={styles.saveButton}>
-        <Text style={styles.saveButtonText}>{saving ? "Guardando..." : "Guardar"}</Text>
+        <Text style={styles.saveButtonText}>
+          {saving ? "Guardando..." : "Guardar"}
+        </Text>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, gap: 10 },
-  label: { fontFamily: "Outfit_400Regular", fontSize: 16, marginTop: 10 },
+  container: {
+    flex: 1,
+    padding: 20,
+    gap: 10,
+  },
+  label: {
+    fontFamily: "Outfit_400Regular",
+    fontSize: 16,
+    marginTop: 10,
+  },
   input: {
-    borderWidth: 2, borderColor: "#ced4da", borderRadius: 8,
-    padding: 12, fontFamily: "Outfit_400Regular", fontSize: 16,
+    borderWidth: 2,
+    borderColor: "#ced4da",
+    borderRadius: 8,
+    padding: 12,
+    fontFamily: "Outfit_400Regular",
+    fontSize: 16,
   },
-  qualityRow: { flexDirection: "row", gap: 10 },
+  qualityRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
   qualityButton: {
-    width: 44, height: 44, borderWidth: 2, borderColor: "#ced4da",
-    borderRadius: 22, justifyContent: "center", alignItems: "center",
+    width: 44,
+    height: 44,
+    borderWidth: 2,
+    borderColor: "#ced4da",
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  qualitySelected: { borderColor: "#1971c2", backgroundColor: "#1971c2" },
-  qualityText: { fontFamily: "Outfit_400Regular" },
-  qualityTextSelected: { fontFamily: "Outfit_400Regular", color: "#fff" },
+  qualitySelected: {
+    borderColor: "#1971c2",
+    backgroundColor: "#1971c2",
+  },
+  qualityText: {
+    fontFamily: "Outfit_400Regular",
+  },
+  qualityTextSelected: {
+    fontFamily: "Outfit_400Regular",
+    color: "#fff",
+  },
   saveButton: {
-    backgroundColor: "#1971c2", borderRadius: 12, paddingVertical: 16,
-    alignItems: "center", marginTop: 20,
+    backgroundColor: "#1971c2",
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 20,
   },
-  saveButtonText: { color: "#fff", fontFamily: "Outfit_400Regular", fontSize: 18 },
+  saveButtonText: {
+    color: "#fff",
+    fontFamily: "Outfit_400Regular",
+    fontSize: 18,
+  },
 });

@@ -1,4 +1,11 @@
-import { Pressable, Text, View, StyleSheet, FlatList, Alert } from "react-native";
+import {
+  Pressable,
+  Text,
+  View,
+  StyleSheet,
+  FlatList,
+  Alert,
+} from "react-native";
 import { useState, useEffect, useCallback } from "react";
 import * as SecureStore from "expo-secure-store";
 import { router, Link } from "expo-router";
@@ -7,9 +14,11 @@ import { useFocusEffect } from "@react-navigation/native";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
 import { API_URL } from "../../config/api";
 import { useUser } from "../../context/userProvider";
+import { useTrainStore } from "../../store/trainStore";
 
 export default function Home() {
   const { loadUser } = useUser();
+  const activeSession = useTrainStore((state) => state.activeSession);
   const [weekDays, setWeekDays] = useState([]);
   const [habits, setHabits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +31,7 @@ export default function Home() {
       return;
     }
     const result = await loadUser();
-    console.log(result)
+    console.log(result);
     if (!result.success) {
       if (result.status === 401) {
         await clearSession();
@@ -143,6 +152,20 @@ export default function Home() {
   return (
     <View style={styles.container}>
       <GoToProfile />
+      {activeSession && (
+        <Pressable
+          onPress={() => router.push("/active-workout")}
+          style={styles.activeSessionBanner}
+        >
+          <Text style={[styles.text, { color: "#000", fontSize: 18 }]}>
+            Entrenamiento en curso: {activeSession.name}
+          </Text>
+          <Text style={[styles.text, { color: "#000", opacity: 0.8 }]}>
+            Tocá para continuar
+          </Text>
+        </Pressable>
+      )}
+
       <View style={styles.habitContainer}>
         {loading ? (
           <View>
@@ -376,5 +399,13 @@ const styles = StyleSheet.create({
     fontFamily: "Outfit_400Regular",
     color: "#868e96",
     textAlign: "center",
+  },
+  activeSessionBanner: {
+    width: "85%",
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: "#ced4da",
+    borderRadius: 15,
+    marginLeft: 10,
   },
 });

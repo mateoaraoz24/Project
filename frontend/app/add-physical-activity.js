@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { API_URL } from "../config/api";
-import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
+import { apiFetch } from "../lib/sesion"
 import {
   FlatList,
   Pressable,
@@ -15,27 +14,11 @@ export default function AddPhysicalActivity() {
   const [activities, setActivities] = useState(null);
   const [searcher, setSearcher] = useState("");
 
-  const clearSession = async () => {
-    await SecureStore.deleteItemAsync("access_token");
-    await SecureStore.deleteItemAsync("refresh_token");
-    await SecureStore.deleteItemAsync("user_id");
-  };
-
   useEffect(() => {
     const getActivities = async () => {
-      const accessToken = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(`${API_URL}/train/physical-activities`, {
+      const response = await apiFetch("/train/physical-activities", {
         method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
       });
-      if (response.status === 401) {
-        await clearSession();
-        router.replace("/login");
-        return;
-      }
       const data = await response.json();
       if (data.success) {
         setActivities(data.data);

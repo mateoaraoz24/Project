@@ -7,7 +7,7 @@ export const GoToProfile = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.text}>
-        Hi,{" "}
+        Hola,{" "}
         <Link href="/profile" style={styles.link}>
           {user?.user.username}
           {">"}

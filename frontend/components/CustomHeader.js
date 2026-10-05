@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet } from "react-native";
 export const CustomHeader = ({ subtitle, paddingTop = 60 }) => (
   <View style={styles.header}>
-    <Text style={[styles.title, { paddingTop }]}>ALEKAIAPP</Text>
+    <Text style={[styles.title, { paddingTop }]}>ReBorn</Text>
     <Text style={styles.subtitle}>{subtitle}</Text>
   </View>
 );

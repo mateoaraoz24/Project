@@ -1,10 +1,11 @@
-import { FlatList, Pressable, Text, View, StyleSheet } from "react-native";
+import { FlatList, Pressable, Text, View, StyleSheet, Alert } from "react-native";
 import { useEffect, useState } from "react";
 import { API_URL } from "../config/api";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function Train() {
   const [routines, setRoutines] = useState(null);
@@ -39,18 +40,15 @@ export default function Train() {
     }
   }, []);
 
-  const getActivityLogs = useCallback(async (accessToken) => {
+  const getTodaysTraining = useCallback(async (accessToken) => {
     try {
-      const response = await fetch(
-        `${API_URL}/train/physical-activities/today`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
+      const response = await fetch(`${API_URL}/train/today`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
       if (response.status === 401) {
         await clearSession();
         router.replace("/login");
@@ -65,10 +63,45 @@ export default function Train() {
     }
   }, []);
 
+  const handleDeleteActivity = (logId) => {
+    Alert.alert("¿Eliminar actividad?", "", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const token = await SecureStore.getItemAsync("access_token");
+            const response = await fetch(
+              `${API_URL}/train/physical-activities/log/${logId}`,
+              {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            const data = await response.json();
+            if (data.success) {
+              setActivityLogs((prev) =>
+                prev.filter(
+                  (item) => !(item.type === "activity" && item.id === logId)
+                )
+              );
+            }
+          } catch (e) {
+            console.log(e.message);
+          }
+        },
+      },
+    ]);
+  };
+
   const loadAll = useCallback(async () => {
     const accessToken = await SecureStore.getItemAsync("access_token");
-    await Promise.all([getRoutines(accessToken), getActivityLogs(accessToken)]);
-  }, [getRoutines, getActivityLogs]);
+    await Promise.all([
+      getRoutines(accessToken),
+      getTodaysTraining(accessToken),
+    ]);
+  }, [getRoutines, getTodaysTraining]);
 
   useFocusEffect(
     useCallback(() => {
@@ -93,13 +126,37 @@ export default function Train() {
           ) : (
             <FlatList
               data={activityLogs}
-              keyExtractor={(item) => item.id.toString()}
+              keyExtractor={(item) => `${item.type}-${item.id}`}
+              style={{ maxHeight: 150 }}
               renderItem={({ item }) => (
-                <View>
-                  <Text>{item.activity_name}</Text>
-                  <Text>
-                    {item.duration_minutes} min · {item.kcal_burned} kcal
-                  </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    paddingHorizontal: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <View>
+                    <Text style={[styles.text, { fontSize: 20 }]}>
+                      {item.name}
+                    </Text>
+                    {item.type === "activity" ? (
+                      <Text style={styles.text}>
+                        {item.duration_minutes} min - {item.kcal_burned} kcal
+                      </Text>
+                    ) : (
+                      <Text style={styles.text}>
+                        {Math.round(item.duration_seconds / 60)} min de
+                        entrenamiento
+                      </Text>
+                    )}
+                  </View>
+                  {item.type === "activity" && (
+                    <Pressable onPress={() => handleDeleteActivity(item.id)}>
+                      <Text style={{ color: "#e03131" }}>✕</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
             />
@@ -146,7 +203,7 @@ export default function Train() {
                       params: { routineId: item.id },
                     })
                   }
-                  style={[styles.button, {borderColor:"#099268", flex:1}]}
+                  style={[styles.button, { borderColor: "#099268", flex: 1 }]}
                 >
                   <Text
                     style={[

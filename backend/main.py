@@ -97,6 +97,11 @@ def calculate_age(birth_date):
       )
     )
   
+def to_naive_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+  
 def calculate_macros_user(weight, height, age, gender, activity_level, training_type, training_days, goal_intensity, goal):
     if gender == "male":
         bmr = 10 * float(weight) + 6.25 * float(height) - 5 * float(age) + 5 
@@ -1797,6 +1802,8 @@ async def delete_routine(routine_id: int, current_user = Depends(get_current_use
 @app.post("/train/sessions")
 async def create_session(data: CreateSessionRequest, current_user = Depends(get_current_user)):
     user_id = current_user["user_id"]
+    started_at = to_naive_utc(data.started_at)
+    finished_at = to_naive_utc(data.finished_at)
     conn = None
     try:
         conn = await get_connection()
@@ -1804,7 +1811,7 @@ async def create_session(data: CreateSessionRequest, current_user = Depends(get_
             session_id = await conn.fetchval("""
                 INSERT INTO workout_sessions (user_id, routine_id, name, started_at, finished_at, duration_seconds, notes)
                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
-            """, user_id, data.routine_id, data.name, data.started_at, data.finished_at, data.duration_seconds, data.notes)
+            """, user_id, data.routine_id, data.name, started_at, finished_at, data.duration_seconds, data.notes)
 
             for exercise in data.exercises:
                 session_exercise_id = await conn.fetchval("""
@@ -1818,7 +1825,7 @@ async def create_session(data: CreateSessionRequest, current_user = Depends(get_
                         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
                     """, session_exercise_id, s.set_number, s.set_type, s.weight, s.reps, s.rpe)
                     if s.set_type == "normal" and s.weight and s.reps:
-                        await check_and_update_pr(conn, user_id, exercise.exercise_id, s.weight, s.reps, set_id, data.finished_at)
+                        await check_and_update_pr(conn, user_id, exercise.exercise_id, s.weight, s.reps, set_id, finished_at)
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -1828,7 +1835,45 @@ async def create_session(data: CreateSessionRequest, current_user = Depends(get_
         print(repr(e))
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error al guardar el entrenamiento.").model_dump())
     finally:
-        if conn: await conn.close() 
+        if conn: await conn.close()
+        
+@app.get("/train/exercises/{exercise_id}/last-performance")
+async def get_last_performance(exercise_id: int, current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        last_session_exercise = await conn.fetchrow("""
+            SELECT se.id
+            FROM session_exercises se
+            JOIN workout_sessions ws ON se.session_id = ws.id
+            WHERE ws.user_id = $1 AND se.exercise_id = $2
+            ORDER BY ws.started_at DESC
+            LIMIT 1
+        """, user_id, exercise_id)
+
+        if not last_session_exercise:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=ApiResponse(success=True, message="Sin historial previo", data=[]).model_dump()
+            )
+
+        sets = await conn.fetch("""
+            SELECT set_number, weight, reps
+            FROM session_sets
+            WHERE session_exercise_id = $1 AND set_type = 'normal'
+            ORDER BY set_number ASC
+        """, last_session_exercise["id"])
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Última marca recuperada", data=clean_json([dict(s) for s in sets])).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
+    finally:
+        if conn: await conn.close()    
         
 @app.get("/train/sessions")
 async def get_sessions(current_user = Depends(get_current_user)):
@@ -1928,6 +1973,8 @@ async def delete_session(session_id: int, current_user = Depends(get_current_use
 @app.put("/train/sessions/{session_id}")
 async def update_session(session_id: int, data: CreateSessionRequest, current_user = Depends(get_current_user)):
     user_id = current_user["user_id"]
+    started_at = to_naive_utc(data.started_at)
+    finished_at = to_naive_utc(data.finished_at)
     conn = None
     try:
         conn = await get_connection()
@@ -1943,7 +1990,7 @@ async def update_session(session_id: int, data: CreateSessionRequest, current_us
                 UPDATE workout_sessions
                 SET routine_id = $1, name = $2, started_at = $3, finished_at = $4, duration_seconds = $5, notes = $6
                 WHERE id = $7
-            """, data.routine_id, data.name, data.started_at, data.finished_at, data.duration_seconds, data.notes, session_id)
+            """, data.routine_id, data.name, started_at, finished_at, data.duration_seconds, data.notes, session_id)
 
             await conn.execute("DELETE FROM session_exercises WHERE session_id = $1", session_id)
 
@@ -1960,7 +2007,7 @@ async def update_session(session_id: int, data: CreateSessionRequest, current_us
                     """, session_exercise_id, s.set_number, s.set_type, s.weight, s.reps, s.rpe)
 
                     if s.set_type == "normal" and s.weight and s.reps:
-                        await check_and_update_pr(conn, user_id, exercise.exercise_id, s.weight, s.reps, set_id, data.finished_at)
+                        await check_and_update_pr(conn, user_id, exercise.exercise_id, s.weight, s.reps, set_id, finished_at)
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -1992,35 +2039,62 @@ async def get_physical_activities(current_user = Depends(get_current_user)):
     finally:
         if conn: await conn.close()
   
-@app.get("/train/physical-activities/today")
-async def get_todays_activities(current_user = Depends(get_current_user)):
+@app.get("/train/today")
+async def get_todays_training(current_user = Depends(get_current_user)):
     user_id = current_user["user_id"]
     conn = None
     try:
         conn = await get_connection()
-        logs = await conn.fetch("""
-            SELECT pal.id, pal.activity_id, pa.name AS activity_name,
-                   pal.duration_minutes, pal.kcal_burned, pal.performed_at
+        activities = await conn.fetch("""
+            SELECT pal.id, 'activity' AS type, pa.name AS name,
+                   pal.duration_minutes, pal.kcal_burned, pal.performed_at AS timestamp
             FROM physical_activity_logs pal
             JOIN physical_activities pa ON pal.activity_id = pa.id
-            WHERE pal.user_id = $1
-              AND pal.performed_at::date = CURRENT_DATE
-            ORDER BY pal.performed_at DESC
+            WHERE pal.user_id = $1 AND pal.performed_at::date = CURRENT_DATE
         """, user_id)
+
+        sessions = await conn.fetch("""
+            SELECT id, 'session' AS type, name,
+                   duration_seconds, started_at AS timestamp
+            FROM workout_sessions
+            WHERE user_id = $1 AND started_at::date = CURRENT_DATE
+        """, user_id)
+
+        combined = [dict(a) for a in activities] + [dict(s) for s in sessions]
+        combined.sort(key=lambda x: x["timestamp"], reverse=True)
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content=ApiResponse(
-                success=True,
-                message="Actividades de hoy recuperadas",
-                data=clean_json([dict(log) for log in logs])
-            ).model_dump()
+            content=ApiResponse(success=True, message="Entrenamiento de hoy recuperado", data=clean_json(combined)).model_dump()
         )
     except Exception as e:
         print(repr(e))
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
     finally:
-        if conn: await conn.close()
+        if conn: await conn.close()  
+        
+@app.delete("/train/physical-activities/log/{log_id}")
+async def delete_physical_activity_log(log_id: int, current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        result = await conn.execute("""
+            DELETE FROM physical_activity_logs WHERE id = $1 AND user_id = $2
+        """, log_id, user_id)
+
+        if result == "DELETE 0":
+            return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content=ApiResponse(success=False, message="Actividad no encontrada").model_dump())
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Actividad eliminada con éxito.").model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error al eliminar la actividad.").model_dump())
+    finally:
+        if conn: await conn.close()    
         
 @app.post("/train/physical-activities/log")
 async def log_physical_activity(data: LogActivityRequest, current_user = Depends(get_current_user)):
