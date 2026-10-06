@@ -360,6 +360,14 @@ class SleepLogRequest(BaseModel):
     quality: int
     notes: Optional[str] = None
     
+class BookLessonSaveRequest(BaseModel):
+    book_id: int
+    topic: str
+    lesson: str
+    
+class DailyAdviceRequest(BaseModel):
+    advice: str
+    
 @app.post("/create-user")
 async def createUser(user: userSignUpTypes):
     username = user.username.strip()
@@ -2199,3 +2207,171 @@ async def get_sleep_history(current_user = Depends(get_current_user)):
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
     finally:
         if conn: await conn.close()
+        
+@app.post("/mental/books/lesson")
+async def save_book_lesson(data: BookLessonSaveRequest, current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        lesson_id = await conn.fetchval("""
+            INSERT INTO book_lesson_logs (user_id, book_id, lesson_summary, lesson_topic)
+            VALUES ($1, $2, $3, $4) RETURNING id
+        """, user_id, data.book_id, data.lesson, data.topic)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Lección guardada", data={"id": lesson_id}).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
+    finally:
+        if conn: await conn.close()
+
+@app.get("/mental/books/{book_id}/previous-topics")
+async def get_previous_topics(book_id: int, current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        rows = await conn.fetch("""
+            SELECT lesson_topic FROM book_lesson_logs
+            WHERE user_id = $1 AND book_id = $2
+        """, user_id, book_id)
+        topics = [r["lesson_topic"] for r in rows if r["lesson_topic"]]
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Temas recuperados", data=topics).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
+    finally:
+        if conn: await conn.close()
+    
+@app.get("/mental/books/progress")
+async def get_all_books_progress(current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+
+        rows = await conn.fetch("""
+            SELECT 
+                b.id,
+                b.title,
+                b.author,
+                b.description,
+                b.target_lessons,
+                COUNT(l.id) AS lessons_viewed
+            FROM mental_books b
+            LEFT JOIN book_lesson_logs l 
+                ON l.book_id = b.id AND l.user_id = $1
+            GROUP BY b.id
+            ORDER BY b.title ASC
+        """, user_id)
+
+        data = []
+        for r in rows:
+            target = r["target_lessons"] or 12
+            viewed = r["lessons_viewed"] or 0
+            data.append({
+                "id": r["id"],
+                "title": r["title"],
+                "author": r["author"],
+                "description": r["description"],
+                "target_lessons": target,
+                "lessons_viewed": viewed,
+                "reached_limit": viewed >= target
+            })
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Progreso de libros recuperado",
+                data=data
+            ).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+            
+@app.get("/mental/daily-advice")
+async def get_daily_advice(current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        today = date.today()
+
+        row = await conn.fetchrow("""
+            SELECT advice_text FROM daily_advice_logs
+            WHERE user_id = $1 AND date = $2
+        """, user_id, today)
+
+        if row:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=ApiResponse(
+                    success=True,
+                    message="Consejo del día",
+                    data={"advice": row["advice_text"], "cached": True}
+                ).model_dump()
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Sin consejo aún",
+                data={"advice": None, "cached": False}
+            ).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+
+@app.post("/mental/daily-advice")
+async def save_daily_advice(data: DailyAdviceRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        today = date.today()
+
+        await conn.execute("""
+            INSERT INTO daily_advice_logs (user_id, date, advice_text)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, date)
+            DO UPDATE SET advice_text = EXCLUDED.advice_text
+        """, user_id, today, data.advice)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Consejo guardado").model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()

@@ -123,3 +123,81 @@ export const analyzeFood = async (base64Image) => {
     return null;
   }
 };
+export const generateBookLesson = async (book, previousTopics, reachedLimit = false) => {
+  const prompt = reachedLimit
+    ? `
+      El usuario ya exploró bastantes lecciones de "${book.title}" de ${book.author}.
+      Ahora dame una forma práctica de APLICAR las ideas de este libro en la vida real esta semana.
+      Sé concreto y accionable.
+      Máximo 550 palabras.
+    `
+    : `
+      Genera una lección breve (máximo 550 palabras) del libro "${book.title}" de ${book.author}.
+      Descripción: ${book.description}
+
+      Ya se mostraron estos temas, NO los repitas: ${
+        previousTopics.length > 0 ? previousTopics.join(", ") : "ninguno"
+      }
+
+      Responde en español, tono del autor, aplicable a la vida diaria.
+    `;
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              topic: { type: "STRING" },
+              lesson: { type: "STRING" },
+            },
+            required: ["topic", "lesson"],
+          },
+        },
+      }),
+    });
+
+    const data = await response.json();
+    if (!data?.candidates?.length) {
+      console.log("Error de Gemini:", data);
+      return null;
+    }
+    const text = data.candidates[0].content.parts[0].text;
+    return JSON.parse(text.trim());
+  } catch (error) {
+    console.error("Error generando lección:", error);
+    return null;
+  }
+};
+
+export const generateDailyAdvice = async () => {
+  const prompt = `
+  Genera un consejo motivacional breve (máximo 200 palabras) sobre disciplina,
+  fuerza mental, optimismo o crecimiento personal, en español, con un tono directo e inspirador.
+  Responde solo con el texto del consejo, sin comillas ni formato adicional.
+  `;
+
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+
+    const data = await response.json();
+    if (!data?.candidates?.length) {
+      console.log("Error de Gemini:", data);
+      return null;
+    }
+    return data.candidates[0].content.parts[0].text.trim();
+  } catch (error) {
+    console.error("Error generando consejo:", error);
+    return null;
+  }
+};

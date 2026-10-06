@@ -62,7 +62,7 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabs: {
     height: 60,
-    marginBottom: 70,
+    marginBottom: 50,
     marginHorizontal: 8,
     borderRadius: 20,
     backgroundColor: "#e9ecef",
