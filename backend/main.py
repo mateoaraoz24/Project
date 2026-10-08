@@ -367,6 +367,10 @@ class BookLessonSaveRequest(BaseModel):
     
 class DailyAdviceRequest(BaseModel):
     advice: str
+       
+class JournalEntryRequest(BaseModel):
+    text_content: str
+    source: str = "text"
     
 @app.post("/create-user")
 async def createUser(user: userSignUpTypes):
@@ -2375,3 +2379,55 @@ async def save_daily_advice(data: DailyAdviceRequest, current_user=Depends(get_c
     finally:
         if conn:
             await conn.close()
+            
+@app.post("/spiritual/journal")
+async def create_journal_entry(data: JournalEntryRequest, current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+
+    if not data.text_content.strip():
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=ApiResponse(success=False, message="La entrada está vacía").model_dump())
+    if data.source not in ("voice", "text"):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=ApiResponse(success=False, message="Origen inválido").model_dump())
+
+    conn = None
+    try:
+        conn = await get_connection()
+        entry_id = await conn.fetchval("""
+            INSERT INTO journal_entries (user_id, text_content, source)
+            VALUES ($1, $2, $3) RETURNING id
+        """, user_id, data.text_content.strip(), data.source)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Entrada guardada", data={"id": entry_id}).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error al guardar la entrada.").model_dump())
+    finally:
+        if conn: await conn.close()
+
+
+@app.get("/spiritual/journal")
+async def get_journal_entries(current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        entries = await conn.fetch("""
+            SELECT id, text_content, source, created_at
+            FROM journal_entries
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT 50
+        """, user_id)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(success=True, message="Diario recuperado", data=clean_json([dict(e) for e in entries])).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
+    finally:
+        if conn: await conn.close()

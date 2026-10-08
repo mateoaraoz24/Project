@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,14 +9,19 @@ import {
   ActivityIndicator,
   ScrollView,
 } from "react-native";
-import { Audio } from "expo-av";
+import {
+  useAudioRecorder,
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+} from "expo-audio";
 import * as FileSystem from "expo-file-system";
 import { router } from "expo-router";
-import { transcribeAudio } from "../../lib/gemini";
-import { apiFetch } from "../../lib/sesion";
+import { transcribeAudio } from "../lib/gemini";
+import { apiFetch } from "../lib/sesion";
 
 export default function Journal() {
-  const recordingRef = useRef(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [text, setText] = useState("");
@@ -25,11 +30,11 @@ export default function Journal() {
 
   useEffect(() => {
     (async () => {
-      const permission = await Audio.requestPermissionsAsync();
-      if (permission.granted) {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
+      const status = await AudioModule.requestRecordingPermissionsAsync();
+      if (status.granted) {
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          allowsRecording: true,
         });
       }
     })();
@@ -37,10 +42,8 @@ export default function Journal() {
 
   const startRecording = async () => {
     try {
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      recordingRef.current = recording;
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setRecording(true);
     } catch (e) {
       console.log(e);
@@ -50,16 +53,11 @@ export default function Journal() {
 
   const stopRecording = async () => {
     try {
+      await recorder.stop();
       setRecording(false);
       setTranscribing(true);
 
-      const current = recordingRef.current;
-      if (!current) return;
-
-      await current.stopAndUnloadAsync();
-      const uri = current.getURI();
-      recordingRef.current = null;
-
+      const uri = recorder.uri;
       if (!uri) {
         Alert.alert("Error", "No se encontró el audio");
         return;

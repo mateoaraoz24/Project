@@ -201,3 +201,35 @@ export const generateDailyAdvice = async () => {
     return null;
   }
 };
+
+export const transcribeAudio = async (base64Audio, mimeType = "audio/mp4") => {
+  const prompt =
+    "Transcribe este audio en español de forma literal. Devuelve solo el texto transcrito, sin comentarios ni formato adicional.";
+
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType, data: base64Audio } },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const data = await response.json();
+    if (!data?.candidates?.length) {
+      console.log("⚠️ Error de Gemini:", data);
+      return null;
+    }
+    return data.candidates[0].content.parts[0].text.trim();
+  } catch (error) {
+    console.error("Error transcribiendo audio:", error);
+    return null;
+  }
+};
