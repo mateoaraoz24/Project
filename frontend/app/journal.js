@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -9,41 +9,102 @@ import {
   ActivityIndicator,
   ScrollView,
 } from "react-native";
-import {
-  useAudioRecorder,
-  AudioModule,
-  RecordingPresets,
-  setAudioModeAsync,
-} from "expo-audio";
+import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import { router } from "expo-router";
 import { transcribeAudio } from "../lib/gemini";
 import { apiFetch } from "../lib/sesion";
 
+const toDateKey = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const formatDateLabel = (date) => {
+  return date.toLocaleDateString("es-ES", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 export default function Journal() {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recordingRef = useRef(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [text, setText] = useState("");
   const [source, setSource] = useState("text");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const isToday = toDateKey(selectedDate) === toDateKey(new Date());
 
   useEffect(() => {
-    (async () => {
-      const status = await AudioModule.requestRecordingPermissionsAsync();
-      if (status.granted) {
-        await setAudioModeAsync({
-          playsInSilentMode: true,
-          allowsRecording: true,
+    setupAudio();
+  }, []);
+
+  useEffect(() => {
+    loadJournal(toDateKey(selectedDate));
+  }, [selectedDate]);
+
+  const setupAudio = async () => {
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (permission.granted) {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
         });
       }
-    })();
-  }, []);
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
+  const loadJournal = async (dateKey) => {
+    setLoading(true);
+    try {
+      const res = await apiFetch(`/spiritual/journal/${dateKey}`);
+      const data = await res.json();
+
+      if (data.success && data.data) {
+        setText(data.data.text_content || "");
+        setSource(data.data.source || "text");
+      } else {
+        setText("");
+        setSource("text");
+      }
+    } catch (e) {
+      console.log(e);
+      setText("");
+      setSource("text");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changeDay = (days) => {
+    const next = new Date(selectedDate);
+    next.setDate(next.getDate() + days);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    next.setHours(0, 0, 0, 0);
+
+    if (next > today) return;
+    setSelectedDate(next);
+  };
 
   const startRecording = async () => {
     try {
-      await recorder.prepareToRecordAsync();
-      recorder.record();
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = newRecording;
       setRecording(true);
     } catch (e) {
       console.log(e);
@@ -53,11 +114,19 @@ export default function Journal() {
 
   const stopRecording = async () => {
     try {
-      await recorder.stop();
       setRecording(false);
       setTranscribing(true);
 
-      const uri = recorder.uri;
+      const current = recordingRef.current;
+      if (!current) {
+        Alert.alert("Error", "No hay grabación activa");
+        return;
+      }
+
+      await current.stopAndUnloadAsync();
+      const uri = current.getURI();
+      recordingRef.current = null;
+
       if (!uri) {
         Alert.alert("Error", "No se encontró el audio");
         return;
@@ -95,6 +164,7 @@ export default function Journal() {
         body: JSON.stringify({
           text_content: text.trim(),
           source,
+          entry_date: toDateKey(selectedDate),
         }),
       });
       const data = await response.json();
@@ -104,7 +174,7 @@ export default function Journal() {
         return;
       }
 
-      router.back();
+      Alert.alert("Listo", "Diario guardado");
     } catch (e) {
       console.log(e);
       Alert.alert("Error", "No se pudo guardar la entrada");
@@ -112,6 +182,50 @@ export default function Journal() {
       setSaving(false);
     }
   };
+
+  const remove = () => {
+    Alert.alert("Eliminar", "¿Borrar esta entrada del diario?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          setDeleting(true);
+          try {
+            const dateKey = toDateKey(selectedDate);
+            const res = await apiFetch(`/spiritual/journal/${dateKey}`, {
+              method: "DELETE",
+            });
+            const data = await res.json();
+
+            if (data.success) {
+              setText("");
+              setSource("text");
+              Alert.alert("Eliminado", "La entrada fue borrada");
+            } else {
+              Alert.alert("Error", data.message || "No se pudo eliminar");
+            }
+          } catch (e) {
+            console.log(e);
+            Alert.alert("Error", "No se pudo eliminar");
+          } finally {
+            setDeleting(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#9c36b5" />
+        <Text style={[styles.text, { marginTop: 12, color: "#868e96" }]}>
+          Cargando diario...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -121,8 +235,26 @@ export default function Journal() {
       <Text style={[styles.text, { fontSize: 32, fontWeight: "700" }]}>
         Diario
       </Text>
+      <View style={styles.dateRow}>
+        <Pressable onPress={() => changeDay(-1)} style={styles.arrowBtn}>
+          <Text style={[styles.text, styles.arrowText]}>←</Text>
+        </Pressable>
+
+        <Text style={[styles.text, styles.dateLabel]}>
+          {isToday ? "Hoy" : formatDateLabel(selectedDate)}
+        </Text>
+
+        <Pressable
+          onPress={() => changeDay(1)}
+          style={[styles.arrowBtn, isToday && { opacity: 0.3 }]}
+          disabled={isToday}
+        >
+          <Text style={[styles.text, styles.arrowText]}>→</Text>
+        </Pressable>
+      </View>
+
       <Text style={[styles.text, { color: "#868e96", marginBottom: 16 }]}>
-        Escribí o grabá tu entrada
+        Escribí o grabá tu entrada 
       </Text>
 
       <TextInput
@@ -131,7 +263,7 @@ export default function Journal() {
           setText(value);
           if (source === "voice") setSource("text");
         }}
-        placeholder="¿Qué estás pensando hoy?"
+        placeholder="¿Qué estás pensando?"
         placeholderTextColor="#adb5bd"
         multiline
         style={styles.input}
@@ -140,7 +272,7 @@ export default function Journal() {
 
       <Pressable
         onPress={recording ? stopRecording : startRecording}
-        disabled={transcribing || saving}
+        disabled={transcribing || saving || deleting}
         style={[
           styles.button,
           {
@@ -171,7 +303,7 @@ export default function Journal() {
 
       <Pressable
         onPress={save}
-        disabled={saving || !text.trim()}
+        disabled={saving || deleting || !text.trim()}
         style={[
           styles.button,
           {
@@ -186,6 +318,23 @@ export default function Journal() {
           {saving ? "Guardando..." : "Guardar"}
         </Text>
       </Pressable>
+
+      <Pressable
+        onPress={remove}
+        disabled={deleting || saving || !text.trim()}
+        style={[
+          styles.button,
+          {
+            borderColor: "#e03131",
+            opacity: !text.trim() || deleting ? 0.5 : 1,
+            marginTop: 10,
+          },
+        ]}
+      >
+        <Text style={[styles.text, styles.buttonText, { color: "#e03131" }]}>
+          {deleting ? "Eliminando..." : "Eliminar"}
+        </Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -195,8 +344,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
   text: {
     fontFamily: "Outfit_400Regular",
+  },
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  arrowBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  arrowText: {
+    fontSize: 28,
+    color: "#1e1e1e",
+  },
+  dateLabel: {
+    fontSize: 18,
+    color: "#495057",
   },
   input: {
     minHeight: 180,

@@ -1,230 +1,226 @@
-import { useState, useEffect, useRef } from "react";
+import {useState, useCallback } from "react";
 import {
-  View,
-  Text,
-  TextInput,
   Pressable,
-  Alert,
+  Text,
+  View,
   StyleSheet,
   ActivityIndicator,
-  ScrollView,
+  Switch,
 } from "react-native";
-import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
-import { router } from "expo-router";
-import { transcribeAudio } from "../../lib/gemini";
+import { router, useFocusEffect } from "expo-router";
 import { apiFetch } from "../../lib/sesion";
 
-export default function Journal() {
-  const recordingRef = useRef(null);
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [text, setText] = useState("");
-  const [source, setSource] = useState("text");
-  const [saving, setSaving] = useState(false);
+export default function Spiritual() {
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [verse, setVerse] = useState(null);
+  const [updating, setUpdating] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const permission = await Audio.requestPermissionsAsync();
-      if (permission.granted) {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-      }
-    })();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
 
-  const startRecording = async () => {
+  const loadData = async () => {
     try {
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      recordingRef.current = recording;
-      setRecording(true);
-    } catch (e) {
-      console.log(e);
-      Alert.alert("Error", "No se pudo iniciar la grabación");
-    }
-  };
+      setLoading(true);
 
-  const stopRecording = async () => {
-    try {
-      setRecording(false);
-      setTranscribing(true);
+      const prefRes = await apiFetch("/spiritual/verse/preference");
+      const prefData = await prefRes.json();
+      const wants = prefData?.success ? !!prefData.data.wants_daily_verse : false;
+      setEnabled(wants);
 
-      const current = recordingRef.current;
-      if (!current) return;
-
-      await current.stopAndUnloadAsync();
-      const uri = current.getURI();
-      recordingRef.current = null;
-
-      if (!uri) {
-        Alert.alert("Error", "No se encontró el audio");
-        return;
-      }
-
-      const base64Audio = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const transcript = await transcribeAudio(base64Audio);
-
-      if (transcript) {
-        setText((prev) => (prev ? prev + "\n" : "") + transcript);
-        setSource("voice");
+      if (wants) {
+        const verseRes = await apiFetch("/spiritual/verse/today");
+        const verseData = await verseRes.json();
+        if (verseData.success && verseData.data?.verse) {
+          setVerse(verseData.data.verse);
+        } else {
+          setVerse(null);
+        }
       } else {
-        Alert.alert(
-          "No se pudo transcribir",
-          "Probá de nuevo o escribí tu entrada."
-        );
+        setVerse(null);
       }
     } catch (e) {
       console.log(e);
-      Alert.alert("Error", "Falló la transcripción");
     } finally {
-      setTranscribing(false);
+      setLoading(false);
     }
   };
 
-  const save = async () => {
-    if (saving || !text.trim()) return;
-    setSaving(true);
+  const toggleVerse = async (value) => {
+    setUpdating(true);
+    setEnabled(value);
     try {
-      const response = await apiFetch("/spiritual/journal", {
-        method: "POST",
-        body: JSON.stringify({
-          text_content: text.trim(),
-          source,
-        }),
+      const res = await apiFetch("/spiritual/verse/preference", {
+        method: "PUT",
+        body: JSON.stringify({ wants_daily_verse: value }),
       });
-      const data = await response.json();
+      const data = await res.json();
 
       if (!data.success) {
-        Alert.alert("Error", data.message || "No se pudo guardar");
+        setEnabled(!value);
         return;
       }
 
-      router.back();
+      if (value) {
+        const verseRes = await apiFetch("/spiritual/verse/today");
+        const verseData = await verseRes.json();
+        if (verseData.success && verseData.data?.verse) {
+          setVerse(verseData.data.verse);
+        }
+      } else {
+        setVerse(null);
+      }
     } catch (e) {
       console.log(e);
-      Alert.alert("Error", "No se pudo guardar la entrada");
+      setEnabled(!value);
     } finally {
-      setSaving(false);
+      setUpdating(false);
     }
   };
 
+  /* const clearSession = async () => {
+    await SecureStore.deleteItemAsync("access_token");
+    await SecureStore.deleteItemAsync("refresh_token");
+    await SecureStore.deleteItemAsync("user_id");
+  }; */
+
+  /* const logout = async () => {
+    try {
+      const token = await SecureStore.getItemAsync("access_token");
+      const refreshToken = await SecureStore.getItemAsync("refresh_token");
+
+      await fetch(`${API_URL}/logout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    } catch (e) {
+      console.log(e);
+    } finally {
+      await clearSession();
+      router.replace("/login");
+    }
+  }; */
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#9c36b5" />
+        <Text style={[styles.text, { marginTop: 12, color: "#868e96" }]}>
+          Cargando...
+        </Text>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-    >
-      <Text style={[styles.text, { fontSize: 32, fontWeight: "700" }]}>
-        Diario
-      </Text>
-      <Text style={[styles.text, { color: "#868e96", marginBottom: 16 }]}>
-        Escribí o grabá tu entrada
-      </Text>
+    <View style={styles.container}>
+      <Text style={[styles.text, { fontSize: 55 }]}>Espiritual</Text>
 
-      <TextInput
-        value={text}
-        onChangeText={(value) => {
-          setText(value);
-          if (source === "voice") setSource("text");
-        }}
-        placeholder="¿Qué estás pensando hoy?"
-        placeholderTextColor="#adb5bd"
-        multiline
-        style={styles.input}
-        textAlignVertical="top"
-      />
+      <View style={styles.prefRow}>
+        <Text style={[styles.text, { fontSize: 16, flex: 1 }]}>
+          Versículo del día
+        </Text>
+        <Switch
+          value={enabled}
+          onValueChange={toggleVerse}
+          disabled={updating}
+          trackColor={{ false: "#ced4da", true: "#d0bfff" }}
+          thumbColor={enabled ? "#9c36b5" : "#f8f9fa"}
+        />
+      </View>
 
-      <Pressable
-        onPress={recording ? stopRecording : startRecording}
-        disabled={transcribing || saving}
-        style={[
-          styles.button,
-          {
-            borderColor: recording ? "#e03131" : "#9c36b5",
-            opacity: transcribing ? 0.6 : 1,
-          },
-        ]}
-      >
-        {transcribing ? (
-          <View style={styles.row}>
-            <ActivityIndicator color="#9c36b5" />
-            <Text style={[styles.text, styles.buttonText, { color: "#9c36b5" }]}>
-              Transcribiendo...
-            </Text>
-          </View>
-        ) : (
-          <Text
-            style={[
-              styles.text,
-              styles.buttonText,
-              { color: recording ? "#e03131" : "#9c36b5" },
-            ]}
-          >
-            {recording ? "Detener grabación" : "Grabar audio"}
+      {enabled && verse && (
+        <View style={styles.verseCard}>
+          <Text style={[styles.text, { fontSize: 13, color: "#868e96" }]}>
+            Versículo del día
           </Text>
-        )}
-      </Pressable>
+          <Text style={[styles.text, { fontSize: 16, marginTop: 8, lineHeight: 24 }]}>
+            "{verse.text}"
+          </Text>
+          <Text style={[styles.text, { fontSize: 14, color: "#9c36b5", marginTop: 10 }]}>
+            {verse.reference}
+          </Text>
+        </View>
+      )}
+
+      {enabled && !verse && (
+        <Text style={[styles.text, { color: "#868e96", marginBottom: 10 }]}>
+          No hay versículo disponible todavía.
+        </Text>
+      )}
 
       <Pressable
-        onPress={save}
-        disabled={saving || !text.trim()}
-        style={[
-          styles.button,
-          {
-            borderColor: "#1e1e1e",
-            backgroundColor: "#1e1e1e",
-            opacity: !text.trim() || saving ? 0.5 : 1,
-            marginTop: 10,
-          },
-        ]}
+        style={[styles.button, { borderColor: "#9c36b5" }]}
+        onPress={() => router.push("/journal")}
       >
-        <Text style={[styles.text, styles.buttonText, { color: "#fff" }]}>
-          {saving ? "Guardando..." : "Guardar"}
+        <Text
+          style={[
+            styles.text,
+            { fontSize: 20, textAlign: "center", color: "#9c36b5" },
+          ]}
+        >
+          Ir al diario
         </Text>
       </Pressable>
-    </ScrollView>
+
+      {/* <Pressable
+        style={[styles.button, { borderColor: "#e03131", marginTop: 10 }]}
+        onPress={logout}
+      >
+        <Text
+          style={[
+            styles.text,
+            { fontSize: 20, textAlign: "center", color: "#e03131" },
+          ]}
+        >
+          Logout
+        </Text>
+      </Pressable> */}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 15,
+    backgroundColor: "#fff",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: "#fff",
   },
   text: {
     fontFamily: "Outfit_400Regular",
   },
-  input: {
-    minHeight: 180,
+  prefRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    paddingVertical: 6,
+  },
+  verseCard: {
     borderWidth: 1,
-    borderColor: "#dee2e6",
+    borderColor: "#e9ecef",
+    backgroundColor: "#f8f9fa",
     borderRadius: 12,
     padding: 14,
-    fontSize: 16,
-    lineHeight: 24,
-    fontFamily: "Outfit_400Regular",
-    color: "#1e1e1e",
-    marginBottom: 16,
+    marginBottom: 8,
   },
   button: {
     paddingVertical: 15,
     borderWidth: 2,
     borderRadius: 8,
-    alignItems: "center",
-  },
-  buttonText: {
-    fontSize: 18,
-    textAlign: "center",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
   },
 });

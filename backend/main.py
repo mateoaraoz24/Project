@@ -186,17 +186,13 @@ def get_protein_factor(
         "cardio": 1000.0,  
         "none": 500.0     
     }
-    
     max_kcal = kcal_limits.get(training_type, 700.0)
     margin = max_factor - base_factor
-    
     if margin <= 0:
         return round(base_factor, 3)
-    
     safe_kcal = min(float(kcal_burned), max_kcal)
     progress = safe_kcal / max_kcal
     factor = base_factor + (margin * progress)
-    
     return round(factor, 3)
 
 def clean_json(obj):
@@ -209,6 +205,27 @@ def clean_json(obj):
     if isinstance(obj, list):
         return [clean_json(v) for v in obj]
     return obj
+
+def parse_date(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+async def get_active_monthly(conn, user_id: int):
+    return await conn.fetchrow("""
+        SELECT *
+        FROM social_monthly_challenges
+        WHERE user_id = $1
+          AND status = 'active'
+          AND end_date >= CURRENT_DATE
+        ORDER BY start_date DESC
+        LIMIT 1
+    """, user_id)
+
+async def get_today_daily(conn, user_id: int):
+    return await conn.fetchrow("""
+        SELECT *
+        FROM social_daily_challenges
+        WHERE user_id = $1 AND challenge_date = CURRENT_DATE
+    """, user_id)
 
 def calculate_sleep_duration(bedtime_str: str, wake_time_str: str) -> int:
     bedtime = datetime.strptime(bedtime_str, "%H:%M")
@@ -368,9 +385,43 @@ class BookLessonSaveRequest(BaseModel):
 class DailyAdviceRequest(BaseModel):
     advice: str
        
-class JournalEntryRequest(BaseModel):
+class JournalRequest(BaseModel):
     text_content: str
     source: str = "text"
+    entry_date: str | None = None
+    
+class VersePreferenceRequest(BaseModel):
+    wants_daily_verse: bool
+    
+class SocialOnboardingRequest(BaseModel):
+    onboarding_text: str
+    summary: str
+    focus_areas: List[str]
+
+class SocialProfileUpdateRequest(BaseModel):
+    reflection_text: Optional[str] = None
+    summary: str
+    focus_areas: List[str]
+
+class SocialDailyCreateRequest(BaseModel):
+    title: str
+    description: str
+    skill: Optional[str] = None
+    difficulty: int = 1
+    mini_lesson_title: Optional[str] = None
+    mini_lesson_content: Optional[str] = None
+
+class SocialMonthlyCreateRequest(BaseModel):
+    title: str
+    description: str
+
+class CompleteDailyRequest(BaseModel):
+    reflection: Optional[str] = None
+    status: str = "completed"  # completed,skipped
+
+class UpdateMonthlyRequest(BaseModel):
+    progress_notes: Optional[str] = None
+    status: Optional[str] = None  # active, completed, abandoned
     
 @app.post("/create-user")
 async def createUser(user: userSignUpTypes):
@@ -585,13 +636,19 @@ async def refresh_token(data: RefreshRequest):
             SELECT * FROM user_sessions
             WHERE refresh_token = $1 AND user_id = $2
         """, token, payload["user_id"])
+        expires = session["expires_at"]
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
 
+        if expires < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión expirada"
+            )
         if not session:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no encontrada")
         if session["is_revoked"]:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión revocada")
-        if session["expires_at"] < datetime.utcnow():
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión expirada")
 
         user_data = {"user_id": payload["user_id"]}
         new_access_token = create_access_token(user_data)
@@ -1192,7 +1249,6 @@ async def get_day_nutrition(date: Optional[str] = None, current_user = Depends(g
 @app.post("/nutrition/save")
 async def save_meal_record(data: SaveMealRequest, current_user = Depends(get_current_user)):
     user_id = current_user["user_id"]
-    
     if data.date:
         try:
             target_date = datetime.strptime(data.date, "%Y-%m-%d").date()
@@ -1203,7 +1259,6 @@ async def save_meal_record(data: SaveMealRequest, current_user = Depends(get_cur
             )
     else:
         target_date = datetime.now().date()
-
     conn = None
     try:
         conn = await get_connection()
@@ -2350,25 +2405,44 @@ async def get_daily_advice(current_user=Depends(get_current_user)):
         if conn:
             await conn.close()
 
-
-@app.post("/mental/daily-advice")
-async def save_daily_advice(data: DailyAdviceRequest, current_user=Depends(get_current_user)):
+@app.post("/spiritual/journal")
+async def save_journal(data: JournalRequest, current_user=Depends(get_current_user)):
     user_id = current_user["user_id"]
     conn = None
     try:
         conn = await get_connection()
-        today = date.today()
+        entry_date = data.entry_date  
+        journal_date = parse_date(entry_date)
+        if entry_date:
+            row = await conn.fetchrow("""
+                INSERT INTO journal_entries (user_id, text_content, source, entry_date)
+                VALUES ($1, $2, $3, $4::date)
+                ON CONFLICT (user_id, entry_date)
+                DO UPDATE SET
+                    text_content = EXCLUDED.text_content,
+                    source = EXCLUDED.source,
+                    updated_at = NOW()
+                RETURNING id, text_content, source, entry_date
+            """, user_id, data.text_content, data.source, journal_date)
+        else:
+            row = await conn.fetchrow("""
+                INSERT INTO journal_entries (user_id, text_content, source, entry_date)
+                VALUES ($1, $2, $3, CURRENT_DATE)
+                ON CONFLICT (user_id, entry_date)
+                DO UPDATE SET
+                    text_content = EXCLUDED.text_content,
+                    source = EXCLUDED.source,
+                    updated_at = NOW()
+                RETURNING id, text_content, source, entry_date
+            """, user_id, data.text_content, data.source)
 
-        await conn.execute("""
-            INSERT INTO daily_advice_logs (user_id, date, advice_text)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (user_id, date)
-            DO UPDATE SET advice_text = EXCLUDED.advice_text
-        """, user_id, today, data.advice)
+        data_out = dict(row)
+        if data_out.get("entry_date"):
+            data_out["entry_date"] = data_out["entry_date"].isoformat()
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content=ApiResponse(success=True, message="Consejo guardado").model_dump()
+            content=ApiResponse(success=True, message="Diario guardado", data=data_out).model_dump()
         )
     except Exception as e:
         print(repr(e))
@@ -2380,54 +2454,619 @@ async def save_daily_advice(data: DailyAdviceRequest, current_user=Depends(get_c
         if conn:
             await conn.close()
             
-@app.post("/spiritual/journal")
-async def create_journal_entry(data: JournalEntryRequest, current_user = Depends(get_current_user)):
+@app.get("/spiritual/journal/today")
+async def get_today_journal(current_user=Depends(get_current_user)):
     user_id = current_user["user_id"]
-
-    if not data.text_content.strip():
-        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=ApiResponse(success=False, message="La entrada está vacía").model_dump())
-    if data.source not in ("voice", "text"):
-        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=ApiResponse(success=False, message="Origen inválido").model_dump())
-
     conn = None
     try:
         conn = await get_connection()
-        entry_id = await conn.fetchval("""
-            INSERT INTO journal_entries (user_id, text_content, source)
-            VALUES ($1, $2, $3) RETURNING id
-        """, user_id, data.text_content.strip(), data.source)
+        row = await conn.fetchrow("""
+            SELECT id, text_content, source, entry_date
+            FROM journal_entries
+            WHERE user_id = $1 AND entry_date = CURRENT_DATE
+        """, user_id)
+
+        data = dict(row) if row else None
+        if data and data.get("entry_date"):
+            data["entry_date"] = data["entry_date"].isoformat()
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content=ApiResponse(success=True, message="Entrada guardada", data={"id": entry_id}).model_dump()
+            content=ApiResponse(
+                success=True,
+                message="Diario de hoy",
+                data=data
+            ).model_dump()
         )
     except Exception as e:
         print(repr(e))
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error al guardar la entrada.").model_dump())
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
     finally:
-        if conn: await conn.close()
-
-
-@app.get("/spiritual/journal")
-async def get_journal_entries(current_user = Depends(get_current_user)):
+        if conn:
+            await conn.close()
+            
+@app.get("/spiritual/journal/{entry_date}")
+async def get_journal_by_date(entry_date: str, current_user=Depends(get_current_user)):
     user_id = current_user["user_id"]
     conn = None
     try:
         conn = await get_connection()
-        entries = await conn.fetch("""
-            SELECT id, text_content, source, created_at
+        journal_date = parse_date(entry_date)
+        row = await conn.fetchrow("""
+            SELECT id, text_content, source, entry_date
             FROM journal_entries
-            WHERE user_id = $1
-            ORDER BY created_at DESC
-            LIMIT 50
+            WHERE user_id = $1 AND entry_date = $2::date
+        """, user_id, journal_date)
+
+        data = dict(row) if row else None
+        if data and data.get("entry_date"):
+            data["entry_date"] = data["entry_date"].isoformat()
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Diario recuperado",
+                data=data
+            ).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+            
+@app.delete("/spiritual/journal/{entry_date}")
+async def delete_journal(entry_date: str, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        result = await conn.execute("""
+            DELETE FROM journal_entries
+            WHERE user_id = $1 AND entry_date = $2::date
+        """, user_id, entry_date)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Diario eliminado",
+                data={"deleted": result != "DELETE 0"}
+            ).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+            
+@app.get("/spiritual/verse/today")
+async def get_today_verse(current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+
+        user = await conn.fetchrow("""
+            SELECT wants_daily_verse FROM users WHERE id = $1
+        """, user_id)
+
+        if not user or not user["wants_daily_verse"]:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=ApiResponse(
+                    success=True,
+                    message="Versículo desactivado",
+                    data={"enabled": False, "verse": None}
+                ).model_dump()
+            )
+
+        existing = await conn.fetchrow("""
+            SELECT v.id, v.reference, v.text, v.theme
+            FROM user_daily_verses udv
+            JOIN daily_verses v ON v.id = udv.verse_id
+            WHERE udv.user_id = $1 AND udv.date = CURRENT_DATE
+        """, user_id)
+
+        if existing:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=ApiResponse(
+                    success=True,
+                    message="Versículo del día",
+                    data={"enabled": True, "verse": dict(existing)}
+                ).model_dump()
+            )
+
+        total = await conn.fetchval("SELECT COUNT(*) FROM daily_verses")
+        if not total:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=ApiResponse(
+                    success=True,
+                    message="No hay versículos",
+                    data={"enabled": True, "verse": None}
+                ).model_dump()
+            )
+
+        day_of_year = date.today().timetuple().tm_yday
+        index = (user_id + day_of_year) % total
+
+        verse = await conn.fetchrow("""
+            SELECT id, reference, text, theme
+            FROM daily_verses
+            ORDER BY id
+            OFFSET $1 LIMIT 1
+        """, index)
+
+        await conn.execute("""
+            INSERT INTO user_daily_verses (user_id, verse_id, date)
+            VALUES ($1, $2, CURRENT_DATE)
+            ON CONFLICT (user_id, date) DO NOTHING
+        """, user_id, verse["id"])
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Versículo del día",
+                data={"enabled": True, "verse": dict(verse)}
+            ).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.put("/spiritual/verse/preference")
+async def update_verse_preference(
+    data: VersePreferenceRequest,
+    current_user=Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        await conn.execute("""
+            UPDATE users
+            SET wants_daily_verse = $1
+            WHERE id = $2
+        """, data.wants_daily_verse, user_id)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Preferencia actualizada",
+                data={"wants_daily_verse": data.wants_daily_verse}
+            ).model_dump()
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.get("/spiritual/verse/preference")
+async def get_verse_preference(current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        row = await conn.fetchrow("""
+            SELECT wants_daily_verse FROM users WHERE id = $1
         """, user_id)
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content=ApiResponse(success=True, message="Diario recuperado", data=clean_json([dict(e) for e in entries])).model_dump()
+            content=ApiResponse(
+                success=True,
+                message="Preferencia recuperada",
+                data={"wants_daily_verse": bool(row["wants_daily_verse"]) if row else False}
+            ).model_dump()
         )
     except Exception as e:
         print(repr(e))
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=ApiResponse(success=False, message="Error").model_dump())
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error").model_dump()
+        )
     finally:
-        if conn: await conn.close()
+        if conn:
+            await conn.close()
+            
+@app.get("/social/status")
+async def social_status(current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        profile = await conn.fetchrow("""
+            SELECT id, summary, focus_areas, updated_at
+            FROM social_profiles
+            WHERE user_id = $1
+        """, user_id)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Estado social",
+                data={
+                    "has_profile": profile is not None,
+                    "profile": dict(profile) if profile else None
+                }
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.post("/social/onboarding")
+async def social_onboarding(data: SocialOnboardingRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        if len(data.onboarding_text.strip()) < 20:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse(
+                    success=False,
+                    message="Cuentanos un poco más sobre tu situación social"
+                ).model_dump()
+            )
+
+        if not data.summary.strip() or not data.focus_areas:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse(
+                    success=False,
+                    message="Faltan summary o focus_areas"
+                ).model_dump()
+            )
+
+        conn = await get_connection()
+        existing = await conn.fetchrow(
+            "SELECT id FROM social_profiles WHERE user_id = $1",
+            user_id
+        )
+        if existing:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse(success=False, message="Ya tienes perfil social").model_dump()
+            )
+
+        row = await conn.fetchrow("""
+            INSERT INTO social_profiles (user_id, onboarding_text, summary, focus_areas)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, summary, focus_areas, created_at, updated_at
+        """, user_id, data.onboarding_text.strip(), data.summary.strip(), data.focus_areas)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Perfil social creado",
+                data=dict(row)
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.put("/social/profile")
+async def update_social_profile(data: SocialProfileUpdateRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        if not data.summary.strip() or not data.focus_areas:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse(success=False, message="Faltan summary o focus_areas").model_dump()
+            )
+        conn = await get_connection()
+        row = await conn.fetchrow("""
+            UPDATE social_profiles
+            SET summary = $1,
+                focus_areas = $2,
+                onboarding_text = CASE
+                    WHEN $3 IS NULL OR $3 = '' THEN onboarding_text
+                    ELSE onboarding_text || E'\n\n--- update ---\n' || $3
+                END,
+                updated_at = NOW()
+            WHERE user_id = $4
+            RETURNING id, summary, focus_areas, updated_at
+        """, data.summary.strip(), data.focus_areas, (data.reflection_text or "").strip(), user_id)
+
+        if not row:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse(success=False, message="No existe perfil social").model_dump()
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Perfil social actualizado",
+                data=dict(row)
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.get("/social/today")
+async def social_today(current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        profile = await conn.fetchrow("""
+            SELECT id, summary, focus_areas, updated_at
+            FROM social_profiles
+            WHERE user_id = $1
+        """, user_id)
+        if not profile:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=ApiResponse(
+                    success=True,
+                    message="Sin perfil",
+                    data={"needs_onboarding": True}
+                ).model_dump()
+            )
+        monthly = await get_active_monthly(conn, user_id)
+        daily = await get_today_daily(conn, user_id)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Social de hoy",
+                data={
+                    "needs_onboarding": False,
+                    "profile": dict(profile),
+                    "monthly": dict(monthly) if monthly else None,
+                    "daily": dict(daily) if daily else None,
+                    "needs_monthly": monthly is None,
+                    "needs_daily": daily is None,
+                }
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.post("/social/daily")
+async def create_social_daily(data: SocialDailyCreateRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+
+        existing = await get_today_daily(conn, user_id)
+        if existing:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=clean_json(ApiResponse(
+                    success=True,
+                    message="Ya existía el reto de hoy",
+                    data=dict(existing)
+                ).model_dump())
+            )
+
+        row = await conn.fetchrow("""
+            INSERT INTO social_daily_challenges (
+                user_id, title, description, skill, difficulty,
+                mini_lesson_title, mini_lesson_content
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
+        """,
+            user_id,
+            data.title.strip(),
+            data.description.strip(),
+            data.skill,
+            data.difficulty,
+            data.mini_lesson_title,
+            data.mini_lesson_content
+        )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Reto diario creado",
+                data=dict(row)
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.post("/social/monthly")
+async def create_social_monthly(data: SocialMonthlyCreateRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+
+        active = await get_active_monthly(conn, user_id)
+        if active:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=clean_json(ApiResponse(
+                    success=True,
+                    message="Ya hay un reto activo",
+                    data=dict(active)
+                ).model_dump())
+            )
+
+        start = date.today()
+        end = start + timedelta(days=30)
+
+        row = await conn.fetchrow("""
+            INSERT INTO social_monthly_challenges (
+                user_id, title, description, start_date, end_date, status
+            )
+            VALUES ($1, $2, $3, $4, $5, 'active')
+            RETURNING *
+        """, user_id, data.title.strip(), data.description.strip(), start, end)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Reto de 30 días creado",
+                data=dict(row)
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.post("/social/today/complete")
+async def complete_daily(data: CompleteDailyRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        if data.status not in ("completed", "skipped"):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse(success=False, message="Status inválido").model_dump()
+            )
+
+        conn = await get_connection()
+        row = await conn.fetchrow("""
+            UPDATE social_daily_challenges
+            SET status = $1,
+                reflection = $2
+            WHERE user_id = $3 AND challenge_date = CURRENT_DATE
+            RETURNING *
+        """, data.status, data.reflection, user_id)
+
+        if not row:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse(success=False, message="No hay reto de hoy").model_dump()
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Reto actualizado",
+                data=dict(row)
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
+@app.put("/social/monthly")
+async def update_monthly(data: UpdateMonthlyRequest, current_user=Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    conn = None
+    try:
+        conn = await get_connection()
+        monthly = await get_active_monthly(conn, user_id)
+        if not monthly:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse(success=False, message="No hay reto activo").model_dump()
+            )
+
+        if data.status and data.status not in ("active", "completed", "abandoned"):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse(success=False, message="Status inválido").model_dump()
+            )
+
+        row = await conn.fetchrow("""
+            UPDATE social_monthly_challenges
+            SET progress_notes = COALESCE($1, progress_notes),
+                status = COALESCE($2, status)
+            WHERE id = $3
+            RETURNING *
+        """, data.progress_notes, data.status, monthly["id"])
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=clean_json(ApiResponse(
+                success=True,
+                message="Reto mensual actualizado",
+                data=dict(row)
+            ).model_dump())
+        )
+    except Exception as e:
+        print(repr(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(success=False, message="Error interno").model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()

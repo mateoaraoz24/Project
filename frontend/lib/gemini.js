@@ -123,7 +123,11 @@ export const analyzeFood = async (base64Image) => {
     return null;
   }
 };
-export const generateBookLesson = async (book, previousTopics, reachedLimit = false) => {
+export const generateBookLesson = async (
+  book,
+  previousTopics,
+  reachedLimit = false
+) => {
   const prompt = reachedLimit
     ? `
       El usuario ya exploró bastantes lecciones de "${book.title}" de ${book.author}.
@@ -132,7 +136,9 @@ export const generateBookLesson = async (book, previousTopics, reachedLimit = fa
       Máximo 550 palabras.
     `
     : `
-      Genera una lección breve (máximo 550 palabras) del libro "${book.title}" de ${book.author}.
+      Genera una lección breve (máximo 550 palabras) del libro "${
+        book.title
+      }" de ${book.author}.
       Descripción: ${book.description}
 
       Ya se mostraron estos temas, NO los repitas: ${
@@ -224,7 +230,7 @@ export const transcribeAudio = async (base64Audio, mimeType = "audio/mp4") => {
 
     const data = await response.json();
     if (!data?.candidates?.length) {
-      console.log("⚠️ Error de Gemini:", data);
+      console.log("Error de Gemini:", data);
       return null;
     }
     return data.candidates[0].content.parts[0].text.trim();
@@ -232,4 +238,220 @@ export const transcribeAudio = async (base64Audio, mimeType = "audio/mp4") => {
     console.error("Error transcribiendo audio:", error);
     return null;
   }
+};
+export const generateSocialProfile = async (onboardingText) => {
+  const prompt = `
+Eres el módulo de análisis social de una aplicación de desarrollo personal.
+Tu trabajo es comprender la situación social del usuario y convertirla en un punto de partida útil para su mejora.
+
+CONTEXTO DE LA APLICACIÓN
+La aplicación busca ayudar a las personas a conocerse mejor, desarrollar habilidades sociales reales y mejorar mediante pequeñas acciones constantes. No busca crear personas perfectas, extrovertidas a la fuerza ni dependientes de la aprobación de los demás.
+
+INFORMACIÓN DEL USUARIO
+<user_input>
+${onboardingText}
+</user_input>
+
+QUÉ DEBES ANALIZAR
+- Qué situaciones sociales le resultan fáciles o difíciles.
+- Qué habilidades quiere desarrollar.
+- Qué obstáculos menciona explícitamente.
+- Qué fortalezas, experiencias o recursos personales pueden ayudarle.
+- Qué áreas de mejora tienen mayor utilidad para su vida cotidiana.
+
+No confundas ser introvertido con tener un problema social.
+No inventes inseguridades, emociones, experiencias ni intenciones.
+No diagnostiques trastornos ni etiquetes la personalidad.
+Si falta información, trabaja únicamente con lo que sabes.
+No conviertas cada dificultad en un defecto: identifica oportunidades concretas de aprendizaje.
+
+REGLAS
+- Español natural, cercano y respetuoso.
+- El resumen describe la situación, no juzga.
+- Entre 2 y 5 focus_areas.
+- Cada área = habilidad práctica, no etiqueta vaga.
+- Prioriza lo que el usuario expresó.
+- No des retos ni lecciones todavía.
+`;
+
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              summary: { type: "STRING" },
+              focus_areas: {
+                type: "ARRAY",
+                items: { type: "STRING" },
+              },
+            },
+            required: ["summary", "focus_areas"],
+          },
+        },
+      }),
+    });
+
+    const data = await response.json();
+    if (!data?.candidates?.length) {
+      console.log("Error Gemini profile:", data);
+      return null;
+    }
+    return JSON.parse(data.candidates[0].content.parts[0].text.trim());
+  } catch (e) {
+    console.error("Error generateSocialProfile:", e);
+    return null;
+  }
+};
+
+export const generateMonthlyChallenge = async (profile) => {
+  const prompt = `
+Eres el entrenador de habilidades sociales de una aplicación de desarrollo personal.
+Diseña UN reto de 30 días para mejorar una habilidad social mediante práctica real.
+
+PERFIL DEL USUARIO
+<profile>
+${JSON.stringify(profile)}
+</profile>
+
+BASE DE APRENDIZAJE
+Inspírate en principios generales de:
+- Dale Carnegie: escucha activa, interés genuino, apreciación sincera.
+- Daniel Goleman: conciencia emocional y empatía.
+- Stephen Covey: iniciativa y responsabilidad personal.
+
+No inventes citas ni reproduzcas libros.
+
+El reto debe:
+- Centrarse en un área prioritaria del perfil.
+- Ser concreto y sostenible 30 días.
+- Practicable en vida cotidiana.
+- Medible por acciones observables del usuario.
+- No exigir resultados de otras personas ni aprobación externa.
+- No fomentar manipulación ni comparación.
+`;
+
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING" },
+              description: { type: "STRING" },
+            },
+            required: ["title", "description"],
+          },
+        },
+      }),
+    });
+
+    const data = await response.json();
+    if (!data?.candidates?.length) {
+      console.log("Error Gemini monthly:", data);
+      return null;
+    }
+    return JSON.parse(data.candidates[0].content.parts[0].text.trim());
+  } catch (e) {
+    console.error("Error generateMonthlyChallenge:", e);
+    return null;
+  }
+};
+
+export const generateDailyChallenge = async (profile, monthly) => {
+  const prompt = `
+Eres el entrenador diario de habilidades sociales de una aplicación de desarrollo personal.
+Genera UN reto para hoy y UNA mini-lección.
+PERFIL
+<profile>
+${JSON.stringify(profile)}
+</profile>
+
+RETO MENSUAL ACTUAL
+<monthly_challenge>
+${JSON.stringify(monthly)}
+</monthly_challenge>
+
+FUENTES DE INSPIRACIÓN
+Inspírate en los principios generales de:
+1. "Cómo ganar amigos e influir sobre las personas", de Dale Carnegie
+2. "Inteligencia emocional", de Daniel Goleman
+3. "Los 7 hábitos de la gente altamente efectiva", de Stephen Covey
+
+Utiliza estos principios para crear enseñanzas originales.
+No inventes citas ni reproduzcas texto de los libros.
+
+El reto debe:
+- Estar conectado con una de las áreas del perfil.
+- Contribuir al reto mensual cuando tenga sentido.
+- Poder completarse hoy en una situación cotidiana.
+- Ser concreto: el usuario debe saber exactamente qué intentar.
+- Tener una dificultad de 1 a 3:
+  1 = muy sencillo y accesible;
+  2 = requiere un pequeño esfuerzo;
+  3 = supone salir moderadamente de la zona de comodidad.
+- Respetar los límites, preferencias y circunstancias del usuario.
+
+La mini-lección debe:
+- Enseñar un principio útil y explicar por qué funciona.
+- Dar una forma concreta de aplicar ese principio.
+- Relacionarse directamente con el reto de hoy.
+- Ayudar al usuario a comprender la habilidad, no solo a obedecer
+  instrucciones.
+- Ser breve, pero aportar una idea que pueda recordar y utilizar
+  en futuras situaciones.
+
+Estilo: español natural, directo, sin toxicidad ni presión social.
+`;
+try {
+  const response = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING" },
+            description: { type: "STRING" },
+            skill: { type: "STRING" },
+            difficulty: { type: "NUMBER" },
+            mini_lesson_title: { type: "STRING" },
+            mini_lesson_content: { type: "STRING" },
+          },
+          required: [
+            "title",
+            "description",
+            "skill",
+            "difficulty",
+            "mini_lesson_title",
+            "mini_lesson_content",
+          ],
+        },
+      },
+    }),
+  });
+
+  const data = await response.json();
+  if (!data?.candidates?.length) {
+    console.log("Error Gemini daily:", data);
+    return null;
+  }
+  return JSON.parse(data.candidates[0].content.parts[0].text.trim());
+} catch (e) {
+  console.error("Error generateDailyChallenge:", e);
+  return null;
+}
 };

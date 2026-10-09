@@ -6,6 +6,7 @@ import {
   StyleSheet,
   FlatList,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { useEffect, useState } from "react";
 import { useUser } from "../context/userProvider";
@@ -100,7 +101,6 @@ export default function Nutrition() {
       setLoading(true);
       const analysis = await analyzeFood(pickerResult.assets[0].base64);
       if (!analysis) {
-        setLoading(false);
         setError("Error", "No se pudo analizar la imagen");
         return;
       }
@@ -110,7 +110,6 @@ export default function Nutrition() {
         body: JSON.stringify(analysis),
       });
       const data = await response.json();
-      setLoading(false);
       if (!data.success) {
         setError("Error", data.message);
         return;
@@ -125,7 +124,9 @@ export default function Nutrition() {
         },
       });
     } catch (e) {
-      setError(e.message);
+      setError(e.message || "No se pudo procesar la comida");
+    } finally {
+      setLoading(false);
     }
   };
   const screenPhoto = async () => {
@@ -231,6 +232,12 @@ export default function Nutrition() {
   const maxKcal = dayInfo?.target_kcal;
   return (
     <View style={styles.container}>
+      {loading && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator size="large" color="#1971c2" />
+          <Text style={styles.loadingText}>Analizando comida...</Text>
+        </View>
+      )}
       <View style={styles.containerDate}>
         <Pressable
           onPress={() => setSelectedDay(addDays(selectedDay, -1))}
@@ -390,6 +397,7 @@ export default function Nutrition() {
 }
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     padding: 15,
     display: "flex",
     flexDirection: "column",
@@ -493,6 +501,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 8,
     height: 100,
+    marginBottom: 10,
   },
   containerDate: {
     display: "flex",
@@ -500,5 +509,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 15,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject, 
+    backgroundColor: "rgba(255, 255, 255, 0.85)",
+    alignItems: "center",
+    zIndex: 999, 
+  },
+  loadingText: {
+    fontFamily: "Outfit_400Regular", 
+    fontSize: 18,
+    color: "#1e1e1e",
+    marginTop: 15,
+    fontWeight: "500",
   },
 });
