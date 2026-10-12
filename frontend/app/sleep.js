@@ -1,8 +1,7 @@
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { useState } from "react";
 import { router } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 
 const toDateKey = (date) => {
   const y = date.getFullYear();
@@ -24,13 +23,8 @@ export default function Sleep() {
     setSaving(true);
     setError("");
     try {
-      const token = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(`${API_URL}/sleep/log`, {
+      const response = await apiFetch(`/sleep/log`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           date: toDateKey(new Date()),
           bedtime,
@@ -117,6 +111,8 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     gap: 10,
+    display:"flex",
+    justifyContent:"center",
   },
   label: {
     fontFamily: "Outfit_400Regular",

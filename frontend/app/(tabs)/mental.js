@@ -1,17 +1,15 @@
 import { Pressable, Text, FlatList, View, StyleSheet, ActivityIndicator } from "react-native";
 import { apiFetch } from "../../lib/sesion";
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { router, useFocusEffect } from "expo-router";
 export default function Mental() {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
-
   useFocusEffect(
     useCallback(() => {
       loadBooks();
     }, [])
   );
-
   const loadBooks = async () => {
     try {
       setLoading(true);
@@ -37,7 +35,6 @@ export default function Mental() {
       </View>
     );
   }
-
   return (
     <View style={styles.container}>
       <Text style={[styles.text, { fontSize: 55 }]}>Mental</Text>

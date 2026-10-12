@@ -12,7 +12,7 @@ import { useGlobalSearchParams, router } from "expo-router";
 import DropDownPicker from "react-native-dropdown-picker";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as SecureStore from "expo-secure-store";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 import { useState, useEffect } from "react";
 export default function EditFood() {
   const params = useGlobalSearchParams();
@@ -39,7 +39,6 @@ export default function EditFood() {
   const isEditing = !!params.mealId;
 
   const uploadImage = async (localUri) => {
-    const token = await SecureStore.getItemAsync("access_token");
     const formData = new FormData();
     formData.append("file", {
       uri: localUri,
@@ -47,9 +46,8 @@ export default function EditFood() {
       type: "image/jpeg",
     });
 
-    const response = await fetch(`${API_URL}/nutrition/upload-image`, {
+    const response = await apiFetch(`/nutrition/upload-image`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
 
@@ -77,18 +75,12 @@ export default function EditFood() {
       if (image && image.startsWith("file://")) {
         uploadedImageUrl = await uploadImage(image);
       }
-      const token = await SecureStore.getItemAsync("access_token");
       const url = isEditing
-        ? `${API_URL}/nutrition/meal/${params.mealId}`
-        : `${API_URL}/nutrition/save`;
+        ? `/nutrition/meal/${params.mealId}`
+        : `/nutrition/save`;
       const method = isEditing ? "PUT" : "POST";
-      console.log(method)
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           meal_name: finalMealName,
           meal_type: categoryValue,
@@ -105,14 +97,13 @@ export default function EditFood() {
           })),
         }),
       });
-
       const data = await response.json();
-      
       if (!data.success) {
         setError(data.message);
         return;
       }
       resetFoods();
+      router.dismissAll();
       router.replace("/nutrition");
     } catch (e) {
       setError("Error al guardar la comida");
@@ -124,12 +115,10 @@ export default function EditFood() {
     if (deleting) return;
     setDeleting(true);
     try {
-      const token = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(
-        `${API_URL}/nutrition/meal/${params.mealId}`,
+      const response = await apiFetch(
+        `/nutrition/meal/${params.mealId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
       const data = await response.json();
@@ -260,7 +249,7 @@ export default function EditFood() {
         </View>
       </View>
       {error && <Text>{error}</Text>}
-      <View style={styles.buttonContainer}>
+      <View style={[styles.buttonContainer, { gap: isEditing ? 5 : 15 }]}>
         {isEditing && (
           <Pressable
             style={[styles.button, { borderColor: "#e03131" }]}
@@ -370,7 +359,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 15,
   },
   button: {
     paddingVertical: 10,

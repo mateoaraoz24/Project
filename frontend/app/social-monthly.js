@@ -30,7 +30,7 @@ export default function SocialMonthly() {
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
       setStatus("completed");
-      setShowUpdate(true); // pedir update de perfil
+      setShowUpdate(true); 
     } catch (e) {
       Alert.alert("Error", e.message || "No se pudo completar");
     } finally {

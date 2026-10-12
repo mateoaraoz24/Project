@@ -9,14 +9,11 @@ import {
 } from "react-native";
 import { useState, useEffect, useRef } from "react";
 import { router, useNavigation, useGlobalSearchParams } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { API_URL } from "../config/api";
 import { useRoutineStore } from "../store/routineStore";
-
+import { apiFetch } from "../lib/sesion";
 export default function CreateRoutine() {
   const params = useGlobalSearchParams();
   const isEditing = !!params.routineId;
-
   const routineName = useRoutineStore((state) => state.routineName);
   const setRoutineName = useRoutineStore((state) => state.setRoutineName);
   const exercises = useRoutineStore((state) => state.exercises);
@@ -25,26 +22,20 @@ export default function CreateRoutine() {
   const removeExercise = useRoutineStore((state) => state.removeExercise);
   const updateRestSeconds = useRoutineStore((state) => state.updateRestSeconds);
   const resetRoutine = useRoutineStore((state) => state.resetRoutine);
-
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState(!isEditing); // si es creación, ya "cargó" de entrada
+  const [loaded, setLoaded] = useState(!isEditing); 
   const navigation = useNavigation();
   const savedRef = useRef(false);
 
-  // si es edición, resetea y trae los datos de la rutina real
   useEffect(() => {
     const loadForEdit = async () => {
       if (!isEditing) {
-        resetRoutine(); // modo creación: siempre arranca limpio
+        resetRoutine();
         return;
       }
-      const token = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(
-        `${API_URL}/train/routines/${params.routineId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+      const response = await apiFetch(
+        `/train/routines/${params.routineId}`,
       );
       const data = await response.json();
       if (data.success) {
@@ -93,18 +84,13 @@ export default function CreateRoutine() {
     setSaving(true);
     setError("");
     try {
-      const token = await SecureStore.getItemAsync("access_token");
       const url = isEditing
-        ? `${API_URL}/train/routines/${params.routineId}`
-        : `${API_URL}/train/routines`;
+        ? `/train/routines/${params.routineId}`
+        : `/train/routines`;
       const method = isEditing ? "PUT" : "POST";
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           name: routineName,
           exercises: exercises.map((e) => ({

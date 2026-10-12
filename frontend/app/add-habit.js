@@ -6,11 +6,11 @@ import {
   StyleSheet,
   FlatList,
 } from "react-native";
-import { useState, useEffect } from "react";
+import { useState} from "react";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
 import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 
 export default function AddHabit() {
   const [frequency, setFrequency] = useState("daily");
@@ -52,34 +52,25 @@ export default function AddHabit() {
     setError("");
     setErrorComponent(null);
     try {
-      const accessToken = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(`${API_URL}/habit`, {
+      const response = await apiFetch("/habit",{
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
         body: JSON.stringify({
           name: clearname,
           frequency,
           days: selectedDays,
         }),
-      });
+      })
       const data = await response.json();
-      setLoading(false);
-      if (response.status === 401) {
-        clearSession();
-        router.replace("/login");
+      if (!response.ok || !data.success) {
+        setError(data.message || "No se pudo crear el hábito");
         return;
       }
-      if (data.success) {
-        router.back()
-      } else {
-        setError(data.message);
-      }
+      router.back();
     } catch (e) {
-      setLoading(false);
+      console.error("Error al crear hábito:", e);
       setError("No se pudo conectar con el servidor");
+    } finally {
+      setLoading(false);
     }
   };
   const clearSession = async () => {
@@ -178,13 +169,12 @@ export default function AddHabit() {
         {errorComponent === "days" && <Text style={styles.error}>{error}</Text>}
       </View>
       <Pressable
-        style={({ pressed }) => [
-          styles.button,
-          pressed && { backgroundColor: "#38d9a9", borderColor: "#38d9a9" },
-        ]}
+        style={[styles.button, { borderColor: "#1971c2" }]}
         onPress={onSubmit}
       >
-        <Text style={styles.buttonText}>{loading ? "Añadiendo" : "Añadir"}</Text>
+        <Text style={[styles.buttonText, { color: "#1971c2" }]}>
+          {loading ? "Añadiendo" : "Añadir"}
+        </Text>
       </Pressable>
     </View>
   );
@@ -203,7 +193,6 @@ const styles = StyleSheet.create({
     fontFamily: "Outfit_400Regular",
     fontSize: 42,
     textTransform: "uppercase",
-  
   },
   label: {
     fontFamily: "Outfit_400Regular",
@@ -242,7 +231,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  checkboxUnselected: { borderRadius: 3, borderWidth: 1, borderColor: "#000" },
+  checkboxUnselected: {
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: "#000",
+  },
   days: {
     width: "100%",
   },
@@ -262,9 +255,7 @@ const styles = StyleSheet.create({
   },
   button: {
     borderWidth: 1,
-    borderColor: "#099268",
     borderRadius: 10,
-    backgroundColor: "#96f2d7",
     padding: 20,
     width: "100%",
   },

@@ -2,7 +2,6 @@ import {
   Pressable,
   Text,
   View,
-  Alert,
   StyleSheet,
   FlatList,
   Image,
@@ -14,10 +13,9 @@ import { useFoodStore } from "../store/foodStore";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { analyzeFood } from "../lib/gemini";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 import CircularProgress from "react-native-circular-progress-indicator";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
 export default function Nutrition() {
   const [dayInfo, setDayInfo] = useState(null);
@@ -56,18 +54,13 @@ export default function Nutrition() {
   };
   const onEditMeal = async (mealId) => {
     try {
-      const token = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(`${API_URL}/nutrition/meal/${mealId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await apiFetch(`/nutrition/meal/${mealId}`);
       const data = await response.json();
       if (!data.success) {
         setError(data.message);
         return;
       }
-
       setFoods(data.data.ingredients);
-
       router.push({
         pathname: "/edit-food",
         params: {
@@ -104,9 +97,8 @@ export default function Nutrition() {
         setError("Error", "No se pudo analizar la imagen");
         return;
       }
-      const response = await fetch(`${API_URL}/nutrition/analyze`, {
+      const response = await apiFetch(`/nutrition/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(analysis),
       });
       const data = await response.json();
@@ -151,11 +143,6 @@ export default function Nutrition() {
     });
     processImg(pickerResult);
   };
-  const clearSession = async () => {
-    await SecureStore.deleteItemAsync("access_token");
-    await SecureStore.deleteItemAsync("refresh_token");
-    await SecureStore.deleteItemAsync("user_id");
-  };
   useEffect(() => {
     const dateKey = toDateKey(selectedDay);
     let isCancelled = false;
@@ -168,24 +155,14 @@ export default function Nutrition() {
     const getDayInfo = async () => {
       setLoadingDay(true);
       try {
-        const accessToken = await SecureStore.getItemAsync("access_token");
         const dateKey = toDateKey(selectedDay);
-        const response = await fetch(
-          `${API_URL}/nutrition/day?date=${dateKey}`,
+        const response = await apiFetch(
+          `/nutrition/day?date=${dateKey}`,
           {
             method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`,
-            },
           }
         );
         if (isCancelled) return;
-        if (response.status === 401) {
-          await clearSession();
-          router.replace("/login");
-          return;
-        }
         const data = await response.json();
         if (data.success && data.data.daily) {
           const info = data.data.daily;
@@ -229,7 +206,11 @@ export default function Nutrition() {
     };
   }, [selectedDay]);
   const currentKcal = dayInfo?.kcal_consumed || 0;
-  const maxKcal = dayInfo?.target_kcal;
+  const maxKcal = dayInfo?.target_kcal || 0;
+  const kcalOver = maxKcal > 0 && currentKcal > maxKcal;
+  const kcalDisplay = kcalOver
+    ? Math.round(currentKcal - maxKcal)
+    : Math.round(Math.max(0, maxKcal - currentKcal));
   return (
     <View style={styles.container}>
       {loading && (
@@ -259,44 +240,127 @@ export default function Nutrition() {
           />
         </Pressable>
       </View>
-      <View style={styles.containerMacros}>
-        <CircularProgress
-          value={(currentKcal / maxKcal) * 100}
-          maxValue={100}
-          radius={110}
-          activeStrokeColor="#000"
-          inActiveStrokeColor="#ced4da"
-          activeStrokeWidth={15}
-          inActiveStrokeWidth={10}
-          showProgressValue={false}
-          title={`${Math.max(0, (maxKcal || 0) - (currentKcal || 0))} kcal`}
-          titleColor="#1e1e1e"
-          subtitle="Restantes"
-          subtitleColor="#1e1e1e"
-          duration={800}
-          rotation={0}
-        />
-        <View style={styles.macros}>
-          <View style={styles.macro}>
-            <Text style={[styles.text, { fontSize: 20 }]}>
-              {Math.round(dayInfo?.carbs_consumed ?? 0)}g
-            </Text>
-            <Text style={[styles.text, { color: "#9c36b5" }]}>Carbos</Text>
-          </View>
-          <View style={styles.macro}>
-            <Text style={[styles.text, { fontSize: 20 }]}>
-              {Math.round(dayInfo?.protein_consumed ?? 0)}g
-            </Text>
-            <Text style={[styles.text, { color: "#2f9e44" }]}>Proteina</Text>
-          </View>
-          <View style={styles.macro}>
-            <Text style={[styles.text, { fontSize: 20 }]}>
-              {Math.round(dayInfo?.fat_consumed ?? 0)}g
-            </Text>
-            <Text style={[styles.text, { color: "#f08c00" }]}>Grasas</Text>
+      {!dayInfo || loadingDay ? (
+        <View style={styles.containerMacros}>
+          <ActivityIndicator size="large" color="#1971c2" />
+          <Text style={[styles.text, { color: "#868e96" }]}>
+            Cargando día...
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.containerMacros}>
+          <CircularProgress
+            value={
+              maxKcal > 0 ? Math.min((currentKcal / maxKcal) * 100, 100) : 0
+            }
+            maxValue={100}
+            radius={110}
+            activeStrokeColor={kcalOver ? "#e03131" : "#000"}
+            inActiveStrokeColor="#ced4da"
+            activeStrokeWidth={15}
+            inActiveStrokeWidth={10}
+            showProgressValue={false}
+            title={`${kcalDisplay} kcal`}
+            titleColor={kcalOver ? "#e03131" : "#1e1e1e"}
+            subtitle={kcalOver ? "De más" : "Restantes"}
+            subtitleColor={kcalOver ? "#e03131" : "#1e1e1e"}
+            duration={800}
+            rotation={0}
+          />
+          <View style={styles.macros}>
+            <View style={styles.macro}>
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    fontSize: 20,
+                    color:
+                      dayInfo.carbs_consumed > dayInfo.target_carbs
+                        ? "#e03131"
+                        : "#1e1e1e",
+                  },
+                ]}
+              >
+                {Math.round(dayInfo.carbs_consumed ?? 0)}/
+                {Math.round(dayInfo.target_carbs ?? 0)}g
+              </Text>
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    color:
+                      dayInfo.carbs_consumed > dayInfo.target_carbs
+                        ? "#e03131"
+                        : "#9c36b5",
+                  },
+                ]}
+              >
+                Carbos
+              </Text>
+            </View>
+            <View style={styles.macro}>
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    fontSize: 20,
+                    color:
+                      dayInfo.protein_consumed > dayInfo.target_protein
+                        ? "#e03131"
+                        : "#1e1e1e",
+                  },
+                ]}
+              >
+                {Math.round(dayInfo.protein_consumed ?? 0)}/
+                {Math.round(dayInfo.target_protein ?? 0)}g
+              </Text>
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    color:
+                      dayInfo.protein_consumed > dayInfo.target_protein
+                        ? "#e03131"
+                        : "#2f9e44",
+                  },
+                ]}
+              >
+                Proteina
+              </Text>
+            </View>
+            <View style={styles.macro}>
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    fontSize: 20,
+                    color:
+                      dayInfo.fat_consumed > dayInfo.target_fat
+                        ? "#e03131"
+                        : "#1e1e1e",
+                  },
+                ]}
+              >
+                {Math.round(dayInfo.fat_consumed ?? 0)}/
+                {Math.round(dayInfo.target_fat ?? 0)}g
+              </Text>
+              <Text
+                style={[
+                  styles.text,
+                  {
+                    color:
+                      dayInfo.fat_consumed > dayInfo.target_fat
+                        ? "#e03131"
+                        : "#f08c00",
+                  },
+                ]}
+              >
+                Grasas
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+      )}
       <View style={{ height: 280 }}>
         {loadingDay ? (
           <Text
@@ -310,7 +374,7 @@ export default function Nutrition() {
               },
             ]}
           >
-            Cargando día...
+            Cargando comidas ...
           </Text>
         ) : dayFoods === null ? (
           <Text style={[styles.text, { color: "#868e96", fontSize: 20 }]}>
@@ -325,16 +389,24 @@ export default function Nutrition() {
                 style={styles.foodContainer}
                 onPress={() => onEditMeal(item.id)}
               >
-                {item.image_url && (
+                {item.image_url ? (
                   <Image
                     source={{ uri: item.image_url }}
                     resizeMode="cover"
                     style={styles.image}
                   />
-                )}
+                ):(<View style={{width: 100}}></View>)}
                 <View style={styles.infoContainer}>
                   <Text style={[styles.text, { fontSize: 25 }]}>
-                    {item.meal_type}
+                    {item.meal_type === "lunch"
+                      ? "Almuerzo"
+                      : item.meal_type === "breakfast"
+                      ? "Desayuno"
+                      : item.meal_type === "dinner"
+                      ? "Cena"
+                      : item.meal_type === "snacks"
+                      ? "Snack"
+                      : item.meal_type}
                   </Text>
                   <Text style={[styles.text, { color: "#1971c2" }]}>
                     {item.total_calories}kcal
@@ -383,14 +455,16 @@ export default function Nutrition() {
             </Pressable>
           </View>
         )}
-        <Pressable
-          onPress={() => setShowOptions((prevValue) => !prevValue)}
-          style={[styles.button, showOptions && styles.buttonActive]}
-        >
-          <Text style={styles.buttonText}>
-            {showOptions ? "Cancelar" : "Añadir"}
-          </Text>
-        </Pressable>
+        {!loading && !loadingDay && (
+          <Pressable
+            onPress={() => setShowOptions((prevValue) => !prevValue)}
+            style={[styles.button, showOptions && styles.buttonActive]}
+          >
+            <Text style={styles.buttonText}>
+              {showOptions ? "Cancelar" : "Añadir"}
+            </Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -493,8 +567,8 @@ const styles = StyleSheet.create({
   foodContainer: {
     display: "flex",
     flexDirection: "row",
-    justifyContent: "flex-start",
     alignItems: "center",
+    justifyContent:"flex-start",
     borderWidth: 2,
     gap: 15,
     borderColor: "#000",
@@ -511,13 +585,16 @@ const styles = StyleSheet.create({
     gap: 15,
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject, 
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255, 255, 255, 0.80)",
+    display: "flex",
     alignItems: "center",
-    zIndex: 999, 
+    justifyContent: "center",
+    flex: 1,
+    zIndex: 999,
   },
   loadingText: {
-    fontFamily: "Outfit_400Regular", 
+    fontFamily: "Outfit_400Regular",
     fontSize: 18,
     color: "#1e1e1e",
     marginTop: 15,

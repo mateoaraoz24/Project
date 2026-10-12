@@ -35,6 +35,7 @@ export default function SearchFood() {
   };
   const onSelectFood = (item) => {
     const newIndex = addFood(item);
+    router.dismissAll(); 
     router.replace({
       pathname: "/edit-aliment",
       params: { index_edited: newIndex },

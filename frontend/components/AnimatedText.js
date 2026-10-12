@@ -20,7 +20,7 @@ export default function AnimatedTextBlock({
           header: () =>
             index >= mensajes.length && (
               <View style={styles.header}>
-                <Text style={styles.title}>ALEKAIAPP</Text>
+                <Text style={styles.title}>ReBorn</Text>
               </View>
             ),
         }}

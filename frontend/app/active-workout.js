@@ -9,8 +9,7 @@ import {
 } from "react-native";
 import { useState, useEffect, useRef } from "react";
 import { router, useNavigation } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 import { useTrainStore } from "../store/trainStore";
 
 const useElapsedTime = (startedAt) => {
@@ -118,15 +117,9 @@ export default function ActiveWorkout() {
     if (saving) return;
     setSaving(true);
     try {
-      const token = await SecureStore.getItemAsync("access_token");
       const now = new Date();
-
-      const response = await fetch(`${API_URL}/train/sessions`, {
+      const response =await apiFetch("/train/sessions",{
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           routine_id: activeSession.routineId,
           name: activeSession.name,
@@ -149,8 +142,7 @@ export default function ActiveWorkout() {
               .filter((s) => s.weight > 0 && s.reps > 0),
           })),
         }),
-      });
-
+      })
       const data = await response.json();
       console.log(data);
       if (!data.success) {

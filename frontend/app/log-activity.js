@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { useGlobalSearchParams, router } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 
 export default function LogActivity() {
   const params = useGlobalSearchParams();
@@ -23,13 +22,8 @@ export default function LogActivity() {
     setSaving(true);
     setError("");
     try {
-      const token = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(`${API_URL}/train/physical-activities/log`, {
+      const response = await apiFetch(`/train/physical-activities/log`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           activity_id: parseInt(params.activityId, 10),
           duration_minutes: numericalDuration,

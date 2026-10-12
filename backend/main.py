@@ -19,6 +19,7 @@ from fastapi.encoders import jsonable_encoder
 from rapidfuzz import fuzz
 from deep_translator import GoogleTranslator
 from decimal import Decimal
+from fastapi import Query
 
 app = FastAPI(title="AlekaiApp Backend")
 load_dotenv()
@@ -209,6 +210,15 @@ def clean_json(obj):
 def parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
+def parse_day(value):
+    try:
+        day = date.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    if abs((day - date.today()).days) > 1:
+        return None
+    return day
+
 async def get_active_monthly(conn, user_id: int):
     return await conn.fetchrow("""
         SELECT *
@@ -219,6 +229,64 @@ async def get_active_monthly(conn, user_id: int):
         ORDER BY start_date DESC
         LIMIT 1
     """, user_id)
+
+
+async def count_day(conn, user_id, day):
+    weekday = day.weekday()
+    total = await conn.fetchval("""
+        SELECT COUNT(*)
+        FROM habits h
+        WHERE h.user_id = $1
+          AND h.is_active = TRUE
+          AND (
+            h.frequency = 'daily'
+            OR (
+                h.frequency = 'weekly'
+                AND EXISTS (
+                    SELECT 1
+                    FROM habit_days hd
+                    WHERE hd.habit_id = h.id
+                      AND hd.week_day = $2
+                )
+            )
+          )
+    """, user_id, weekday)
+    completed = await conn.fetchval("""
+        SELECT COUNT(DISTINCT h.id)
+        FROM habit_logs l
+        JOIN habits h ON h.id = l.habit_id
+        WHERE l.user_id = $1
+          AND l.log_date = $2
+          AND h.is_active = TRUE
+          AND (
+            h.frequency = 'daily'
+            OR (
+                h.frequency = 'weekly'
+                AND EXISTS (
+                    SELECT 1
+                    FROM habit_days hd
+                    WHERE hd.habit_id = h.id
+                      AND hd.week_day = $3
+                )
+            )
+          )
+    """, user_id, day, weekday)
+    if total:
+        await conn.execute("""
+            INSERT INTO habit_day_stats
+                (user_id, day, completed, total)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, day)
+            DO UPDATE SET
+                completed = EXCLUDED.completed,
+                total = EXCLUDED.total
+        """, user_id, day, completed, total)
+    return {
+        "date": day.isoformat(),
+        "completed": completed or 0,
+        "total": total or 0
+    }
+
 
 async def get_today_daily(conn, user_id: int):
     return await conn.fetchrow("""
@@ -305,6 +373,10 @@ class AnalyzeFoodRequest(BaseModel):
     is_food: bool
     meal_name: str
     foods: list[FoodRequest]
+    
+class ToggleHabit(BaseModel):
+    habit_id: int
+    date: str
     
 class UserPhysiqueRequest(BaseModel):
     height: float
@@ -422,6 +494,14 @@ class CompleteDailyRequest(BaseModel):
 class UpdateMonthlyRequest(BaseModel):
     progress_notes: Optional[str] = None
     status: Optional[str] = None  # active, completed, abandoned
+    
+class UsernameUpdateRequest(BaseModel):
+    username: str
+
+class PasswordUpdateRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
     
 @app.post("/create-user")
 async def createUser(user: userSignUpTypes):
@@ -815,6 +895,150 @@ async def me(current_user=Depends(get_current_user)):
         if conn:
             await conn.close()
 
+@app.patch("/profile/username")
+async def update_username(
+    data: UsernameUpdateRequest,
+    current_user=Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
+    username = data.username.strip()
+    if len(username) < 3 or len(username) > 12:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ApiResponse(
+                success=False,
+                message="El username debe tener entre 3 y 12 caracteres"
+            ).model_dump()
+        )
+    conn = None
+    try:
+        conn = await get_connection()
+        row = await conn.fetchrow("""
+            UPDATE users
+            SET username = $1
+            WHERE id = $2
+            RETURNING id, username
+        """, username, user_id)
+        if not row:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse(
+                    success=False,
+                    message="Usuario no encontrado"
+                ).model_dump()
+            )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Username actualizado",
+                data=dict(row)
+            ).model_dump()
+        )
+    except asyncpg.exceptions.UniqueViolationError:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=ApiResponse(
+                success=False,
+                message="Ese username ya está en uso"
+            ).model_dump()
+        )
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(
+                success=False,
+                message="Error interno del servidor"
+            ).model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+            
+@app.patch("/profile/password")
+async def update_password(
+    data: PasswordUpdateRequest,
+    current_user=Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
+    current_password = data.current_password
+    new_password = data.new_password
+    confirm_password = data.confirm_password
+    if len(new_password) < 8 or len(new_password) > 12:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ApiResponse(
+                success=False,
+                message="La contraseña debe tener entre 8 y 12 caracteres"
+            ).model_dump()
+        )
+    if new_password != confirm_password:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ApiResponse(
+                success=False,
+                message="Las contraseñas nuevas no coinciden"
+            ).model_dump()
+        )
+    if current_password == new_password:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ApiResponse(
+                success=False,
+                message="La nueva contraseña debe ser diferente"
+            ).model_dump()
+        )
+    conn = None
+    try:
+        conn = await get_connection()
+        row = await conn.fetchrow("""
+            SELECT password
+            FROM users
+            WHERE id = $1
+        """, user_id)
+        if not row:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse(
+                    success=False,
+                    message="Usuario no encontrado"
+                ).model_dump()
+            )
+        if not pwd_context.verify(current_password, row["password"]):
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content=ApiResponse(
+                    success=False,
+                    message="La contraseña actual es incorrecta"
+                ).model_dump()
+            )
+        hashed_password = pwd_context.hash(new_password)
+        await conn.execute("""
+            UPDATE users
+            SET password = $1
+            WHERE id = $2
+        """, hashed_password, user_id)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Contraseña actualizada correctamente"
+            ).model_dump()
+        )
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse(
+                success=False,
+                message="Error interno del servidor"
+            ).model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
 @app.post("/habit")
 async def create_habit(
     habit: HabitCreate,
@@ -911,30 +1135,29 @@ async def create_habit(
             await conn.close()
          
 @app.get("/habits")
-async def get_habits(current_user=Depends(get_current_user)) :
-    conn=None
-    try:
+async def get_habits(current_user=Depends(get_current_user)):
+    conn = None
+    try: 
         conn = await get_connection()
+        today_week_day = (date.today().weekday())  
         habits = await conn.fetch("""
-            SELECT id, name, frequency
-            FROM habits
-            WHERE user_id = $1
-            """, current_user["user_id"])
-        result = []
-        for habit in habits:
-            habit_data = dict(habit)
-
-            if habit["frequency"] == "weekly":
-                days = await conn.fetch("""
-                SELECT week_day
-                FROM habit_days
-                WHERE habit_id = $1
-                """, habit["id"])
-
-                habit_data["days"] = [d["week_day"] for d in days]
-            else:
-                habit_data["days"] = []
-            result.append(habit_data)
+            SELECT h.id, h.name, h.frequency
+            FROM habits h
+            WHERE h.user_id = $1
+            AND (
+                h.frequency = 'daily'
+                OR (
+                    h.frequency = 'weekly'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM habit_days hd
+                        WHERE hd.habit_id = h.id
+                        AND hd.week_day = $2
+                    )
+                )
+            )
+        """, current_user["user_id"], today_week_day)
+        result = [dict(habit) for habit in habits]
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=ApiResponse(
@@ -955,6 +1178,148 @@ async def get_habits(current_user=Depends(get_current_user)) :
     finally:
         if conn:
             await conn.close()
+
+@app.get("/habits/home")
+async def habits_home(date: str, start: str, end: str, current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    day = parse_day(date)
+    start_day = parse_date(start)
+    end_day = parse_date(end)
+    if not day:
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=ApiResponse(success=False, message="Fecha inválida").model_dump())
+    conn = None
+    try:
+        conn = await get_connection()
+        weekday = day.weekday()
+        rows = await conn.fetch("""
+            SELECT
+                h.id,
+                h.name,
+                h.frequency,
+                h.is_active,
+                COALESCE(
+                    ARRAY_AGG(hd.week_day)
+                        FILTER (WHERE hd.week_day IS NOT NULL),
+                    ARRAY[]::SMALLINT[]
+                ) AS days,
+                EXISTS (
+                    SELECT 1
+                    FROM habit_logs hl
+                    WHERE hl.habit_id = h.id
+                      AND hl.user_id = $1
+                      AND hl.log_date = $2
+                ) AS done
+            FROM habits h
+            LEFT JOIN habit_days hd
+                ON hd.habit_id = h.id
+            WHERE h.user_id = $1
+            GROUP BY h.id;
+        """, user_id, day)
+        await count_day(conn, user_id, day)
+        stats = await conn.fetch("""
+            SELECT day, completed, total
+            FROM habit_day_stats
+            WHERE user_id = $1 AND day BETWEEN $2 AND $3
+        """, user_id, start_day, end_day)
+        return JSONResponse(status_code=status.HTTP_200_OK, content=ApiResponse(
+            success=True,
+            message="Hábitos del día",
+            data={
+                "habits": [dict(r) for r in rows],
+                "week": [
+                    {"date": r["day"].isoformat(), "completed": r["completed"], "total": r["total"]}
+                    for r in stats
+                ],
+            },
+        ).model_dump())
+    finally:
+        if conn:
+            await conn.close()
+            
+@app.post("/habit/toggle")
+async def toggle_habit(
+    body: ToggleHabit,
+    current_user=Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
+    day = parse_day(body.date)
+
+    if not day:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ApiResponse(
+                success=False,
+                message="Fecha inválida"
+            ).model_dump()
+        )
+
+    conn = None
+    try:
+        conn = await get_connection()
+
+        habit = await conn.fetchrow("""
+            SELECT h.id
+            FROM habits h
+            WHERE h.id = $1
+              AND h.user_id = $2
+              AND h.is_active = TRUE
+              AND (
+                h.frequency = 'daily'
+                OR (
+                    h.frequency = 'weekly'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM habit_days hd
+                        WHERE hd.habit_id = h.id
+                          AND hd.week_day = $3
+                    )
+                )
+              )
+        """, body.habit_id, user_id, day.weekday())
+
+        if not habit:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse(
+                    success=False,
+                    message="Hábito no encontrado"
+                ).model_dump()
+            )
+
+        exists = await conn.fetchrow("""
+            SELECT id
+            FROM habit_logs
+            WHERE habit_id = $1
+              AND user_id = $2
+              AND log_date = $3
+        """, body.habit_id, user_id, day)
+
+        if exists:
+            await conn.execute("""
+                DELETE FROM habit_logs
+                WHERE id = $1
+            """, exists["id"])
+            done = False
+        else:
+            await conn.execute("""
+                INSERT INTO habit_logs (user_id, habit_id, log_date)
+                VALUES ($1, $2, $3)
+            """, user_id, body.habit_id, day)
+            done = True
+        summary = await count_day(conn, user_id, day)
+        summary["done"] = done
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse(
+                success=True,
+                message="Actualizado",
+                data=summary
+            ).model_dump()
+        )
+    finally:
+        if conn:
+            await conn.close()
+
 
 @app.post("/users/physique")
 async def save_physique(
@@ -1754,10 +2119,21 @@ async def get_routines(current_user = Depends(get_current_user)):
     try:
         conn = await get_connection()
         routines = await conn.fetch("""
-            SELECT id, name, created_at
-            FROM routines
-            WHERE user_id = $1
-            ORDER BY order_index ASC, created_at DESC
+            SELECT
+                r.id,
+                r.name,
+                r.created_at,
+                COALESCE(
+                    STRING_AGG(DISTINCT e.muscle_group, ', ' ORDER BY e.muscle_group)
+                        FILTER (WHERE e.muscle_group IS NOT NULL AND e.muscle_group <> ''),
+                    ''
+                ) AS muscles
+            FROM routines r
+            LEFT JOIN routine_exercises re ON re.routine_id = r.id
+            LEFT JOIN exercises e ON e.id = re.exercise_id
+            WHERE r.user_id = $1
+            GROUP BY r.id
+            ORDER BY r.order_index ASC, r.created_at DESC
         """, user_id)
 
         return JSONResponse(

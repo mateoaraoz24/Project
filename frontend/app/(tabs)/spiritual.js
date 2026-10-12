@@ -48,7 +48,6 @@ export default function Spiritual() {
       setLoading(false);
     }
   };
-
   const toggleVerse = async (value) => {
     setUpdating(true);
     setEnabled(value);
@@ -80,34 +79,6 @@ export default function Spiritual() {
       setUpdating(false);
     }
   };
-
-  /* const clearSession = async () => {
-    await SecureStore.deleteItemAsync("access_token");
-    await SecureStore.deleteItemAsync("refresh_token");
-    await SecureStore.deleteItemAsync("user_id");
-  }; */
-
-  /* const logout = async () => {
-    try {
-      const token = await SecureStore.getItemAsync("access_token");
-      const refreshToken = await SecureStore.getItemAsync("refresh_token");
-
-      await fetch(`${API_URL}/logout`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-    } catch (e) {
-      console.log(e);
-    } finally {
-      await clearSession();
-      router.replace("/login");
-    }
-  }; */
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -118,7 +89,6 @@ export default function Spiritual() {
       </View>
     );
   }
-
   return (
     <View style={styles.container}>
       <Text style={[styles.text, { fontSize: 55 }]}>Espiritual</Text>

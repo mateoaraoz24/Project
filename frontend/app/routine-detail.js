@@ -5,11 +5,11 @@ import {
   Pressable,
   Alert,
   StyleSheet,
+  ActivityIndicator,
 } from "react-native";
 import { useState, useCallback } from "react";
 import { useFocusEffect, useGlobalSearchParams, router } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { API_URL } from "../config/api";
+import {apiFetch} from '../lib/sesion'
 import { useTrainStore } from "../store/trainStore";
 
 export default function RoutineDetail() {
@@ -19,12 +19,8 @@ export default function RoutineDetail() {
   const startSession = useTrainStore((state) => state.startSession);
   const activeSession = useTrainStore((state) => state.activeSession);
   const loadRoutine = useCallback(async () => {
-    const token = await SecureStore.getItemAsync("access_token");
-    const response = await fetch(
-      `${API_URL}/train/routines/${params.routineId}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
+    const response = await apiFetch(
+      `/train/routines/${params.routineId}`
     );
     const data = await response.json();
     if (data.success) {
@@ -46,12 +42,10 @@ export default function RoutineDetail() {
         text: "Eliminar",
         style: "destructive",
         onPress: async () => {
-          const token = await SecureStore.getItemAsync("access_token");
-          const response = await fetch(
-            `${API_URL}/train/routines/${params.routineId}`,
+          const response = await apiFetch(
+            `/train/routines/${params.routineId}`,
             {
               method: "DELETE",
-              headers: { Authorization: `Bearer ${token}` },
             }
           );
           const data = await response.json();
@@ -82,20 +76,18 @@ export default function RoutineDetail() {
       );
       return;
     }
-
     if (activeSession && activeSession.routineId === routine.id) {
       router.push("/active-workout");
       return;
     }
-
     startSession(routine.id, routine.name, exercises);
     router.push("/active-workout");
   };
-
   if (!routine)
     return (
-      <View>
-        <Text>Cargando...</Text>
+      <View style={styles.loadingOverlay} pointerEvents="none">
+        <ActivityIndicator size="large" color="#1971c2" />
+        <Text style={styles.loadingText}>Cargando rutina...</Text>
       </View>
     );
 
@@ -109,7 +101,7 @@ export default function RoutineDetail() {
         renderItem={({ item }) => (
           <View>
             <Text style={[styles.text, { fontSize: 24 }]}>{item.name}</Text>
-            <Text style={[styles.text, { fontSize: 18, color:"#e8590c" }]}>
+            <Text style={[styles.text, { fontSize: 18, color: "#e8590c" }]}>
               {item.target_sets} series
             </Text>
             <Text style={[styles.text, { fontSize: 16, color: "#1971c2" }]}>
@@ -178,5 +170,21 @@ const styles = StyleSheet.create({
   },
   text: {
     fontFamily: "Outfit_400Regular",
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255, 255, 255, 0.80)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+    zIndex: 999,
+  },
+  loadingText: {
+    fontFamily: "Outfit_400Regular",
+    fontSize: 18,
+    color: "#1e1e1e",
+    marginTop: 15,
+    fontWeight: "500",
   },
 });

@@ -11,7 +11,6 @@ import {
 } from "react-native";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
-import { router } from "expo-router";
 import { transcribeAudio } from "../lib/gemini";
 import { apiFetch } from "../lib/sesion";
 
@@ -70,7 +69,6 @@ export default function Journal() {
     try {
       const res = await apiFetch(`/spiritual/journal/${dateKey}`);
       const data = await res.json();
-
       if (data.success && data.data) {
         setText(data.data.text_content || "");
         setSource(data.data.source || "text");
@@ -79,7 +77,6 @@ export default function Journal() {
         setSource("text");
       }
     } catch (e) {
-      console.log(e);
       setText("");
       setSource("text");
     } finally {

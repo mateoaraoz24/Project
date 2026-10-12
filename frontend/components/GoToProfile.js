@@ -1,28 +1,22 @@
 import { Text, View, StyleSheet } from "react-native";
 import { Link } from "expo-router";
-import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import {useUser} from '../context/userProvider'
+import { useUser } from "../context/userProvider";
 export const GoToProfile = () => {
-  const {user} = useUser();
+  const { user } = useUser();
   return (
     <View style={styles.container}>
       <Text style={styles.text}>
         Hola,{" "}
         <Link href="/profile" style={styles.link}>
           {user?.user.username}
-          {">"}
         </Link>
       </Text>
-      <View style={styles.streakContainer}>
-        <Text style={styles.streak}>24 días en racha</Text>
-        <MaterialCommunityIcons name="fire" size={30} color="#e03131" />
-      </View>
     </View>
   );
 };
 const styles = StyleSheet.create({
   text: {
-    fontSize: 52,
+    fontSize: 48,
     fontFamily: "Outfit_400Regular",
     lineHeight: 56,
   },
@@ -34,16 +28,5 @@ const styles = StyleSheet.create({
     display: "flex",
     flexDirection: "column",
     padding: 10,
-  },
-  streak: {
-    fontSize: 22,
-    color: "#f08c00",
-    fontFamily: "Outfit_400Regular",
-  },
-  streakContainer: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: -8
   },
 });

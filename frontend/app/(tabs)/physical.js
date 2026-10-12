@@ -27,36 +27,36 @@ export default function Physical() {
   return (
     <View style={styles.container}>
       <GoToProfile />
-      <Text style={styles.text}>
+      <Text style={[styles.text, {color: "#e03131",}]}>
         Si sigues asi, nadie te reconocerá en 6 meses
       </Text>
       <View style={styles.containerButtons}>
         <Pressable
           style={[
             styles.button,
-            { borderColor: "#f08c00", backgroundColor: "#ffec99" },
+            { borderColor: "#f08c00"},
           ]}
           onPress={() => router.push("/nutrition")}
         >
-          <Text style={styles.buttonText}>Nutrición</Text>
+          <Text style={[styles.buttonText, {color:"#f08c00"}]}>Nutrición</Text>
         </Pressable>
         <Pressable
           style={[
             styles.button,
-            { borderColor: "#1971c2", backgroundColor: "#a5d8ff" },
+            { borderColor: "#1971c2"},
           ]}
           onPress={() => router.push("/sleep")}
         >
-          <Text style={styles.buttonText}>Dormir</Text>
+          <Text style={[styles.buttonText, {color:"#1971c2"}]}>Dormir</Text>
         </Pressable>
         <Pressable
           style={[
             styles.button,
-            { borderColor: "#2f9e44", backgroundColor: "#b2f2bb" },
+            { borderColor: "#2f9e44"},
           ]}
           onPress={() => router.push("/train")}
         >
-          <Text style={styles.buttonText}>Entrenamiento</Text>
+          <Text style={[styles.buttonText, {color:"#2f9e44"}]}>Entrenamiento</Text>
         </Pressable>
       </View>
     </View>
@@ -92,7 +92,6 @@ const styles = StyleSheet.create({
   text: {
     fontFamily: "Outfit_400Regular",
     fontSize: 16,
-    color: "#099268",
     textAlign: "center",
   },
 });

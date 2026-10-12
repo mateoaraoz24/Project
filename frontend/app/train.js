@@ -1,59 +1,24 @@
-import { FlatList, Pressable, Text, View, StyleSheet, Alert } from "react-native";
-import { useEffect, useState } from "react";
-import { API_URL } from "../config/api";
+import {
+  FlatList,
+  Pressable,
+  Text,
+  View,
+  StyleSheet,
+  Alert,
+} from "react-native";
+import {  useState } from "react";
+import {apiFetch} from '../lib/sesion'
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
 export default function Train() {
-  const [routines, setRoutines] = useState(null);
   const [activityLogs, setActivityLogs] = useState(null);
-
-  const clearSession = async () => {
-    await SecureStore.deleteItemAsync("access_token");
-    await SecureStore.deleteItemAsync("refresh_token");
-    await SecureStore.deleteItemAsync("user_id");
-  };
-
-  const getRoutines = useCallback(async (accessToken) => {
+  const getTodaysTraining = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/train/routines`, {
+      const response = await apiFetch(`/train/today`, {
         method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
       });
-      if (response.status === 401) {
-        await clearSession();
-        router.replace("/login");
-        return;
-      }
-      const data = await response.json();
-      if (data.success) {
-        setRoutines(data.data);
-      }
-    } catch (e) {
-      console.log(e.message);
-    }
-  }, []);
-
-  const getTodaysTraining = useCallback(async (accessToken) => {
-    try {
-      const response = await fetch(`${API_URL}/train/today`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-      if (response.status === 401) {
-        await clearSession();
-        router.replace("/login");
-        return;
-      }
       const data = await response.json();
       if (data.success) {
         setActivityLogs(data.data);
@@ -62,7 +27,6 @@ export default function Train() {
       console.log(e.message);
     }
   }, []);
-
   const handleDeleteActivity = (logId) => {
     Alert.alert("¿Eliminar actividad?", "", [
       { text: "Cancelar", style: "cancel" },
@@ -71,12 +35,10 @@ export default function Train() {
         style: "destructive",
         onPress: async () => {
           try {
-            const token = await SecureStore.getItemAsync("access_token");
-            const response = await fetch(
-              `${API_URL}/train/physical-activities/log/${logId}`,
+            const response = await apiFetch(
+              `/train/physical-activities/log/${logId}`,
               {
                 method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
               }
             );
             const data = await response.json();
@@ -97,11 +59,8 @@ export default function Train() {
 
   const loadAll = useCallback(async () => {
     const accessToken = await SecureStore.getItemAsync("access_token");
-    await Promise.all([
-      getRoutines(accessToken),
-      getTodaysTraining(accessToken),
-    ]);
-  }, [getRoutines, getTodaysTraining]);
+    await getTodaysTraining(accessToken);
+  }, [getTodaysTraining]);
 
   useFocusEffect(
     useCallback(() => {
@@ -110,9 +69,9 @@ export default function Train() {
   );
 
   return (
-    <View style={{ flex: 1, padding: 15 }}>
+    <View style={styles.container}>
       <Text style={[styles.text, { fontSize: 48 }]}>Entrenamiento</Text>
-      <View style={styles.container}>
+      <View style={styles.activity}>
         <View style={styles.block}>
           {activityLogs === null || activityLogs.length === 0 ? (
             <Text
@@ -177,62 +136,16 @@ export default function Train() {
             </Pressable>
           </View>
         </View>
-        <View style={styles.block}>
-          <Text style={[styles.text, { fontSize: 27 }]}>Mis rutinas</Text>
-          {routines === null || routines.length === 0 ? (
-            <Text
-              style={[
-                styles.text,
-                { color: "#868e96", textAlign: "center", fontSize: 20 },
-              ]}
-            >
-              Sin rutinas aún
-            </Text>
-          ) : (
-            <FlatList
-              data={routines}
-              numColumns={2}
-              keyExtractor={(item) => item.id.toString()}
-              columnWrapperStyle={{ gap: 10 }}
-              contentContainerStyle={{ gap: 10 }}
-              renderItem={({ item }) => (
-                <Pressable
-                  onPress={() =>
-                    router.push({
-                      pathname: "/routine-detail",
-                      params: { routineId: item.id },
-                    })
-                  }
-                  style={[styles.button, { borderColor: "#099268", flex: 1 }]}
-                >
-                  <Text
-                    style={[
-                      styles.text,
-                      { fontSize: 25, textAlign: "center", color: "#099268" },
-                    ]}
-                  >
-                    {item.name}
-                  </Text>
-                </Pressable>
-              )}
-            />
-          )}
-          <View style={styles.buttonContainer}>
-            <Pressable
-              onPress={() => router.push("create-routine")}
-              style={[styles.button, { width: 210, borderColor: "#9c36b5" }]}
-            >
-              <Text
-                style={[
-                  styles.text,
-                  { fontSize: 25, textAlign: "center", color: "#9c36b5" },
-                ]}
-              >
-                Añadir rutina
-              </Text>
-            </Pressable>
-          </View>
-        </View>
+        <Pressable onPress={()=>router.push("/routines")}>
+          <Text
+            style={[
+              styles.text,
+              { fontSize: 25, textAlign: "center", color: "#9c36b5" },
+            ]}
+          >
+            Añadir rutina {"->"}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -242,7 +155,19 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "column",
     justifyContent: "center",
-    gap: 45,
+    gap: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 50,
+  },
+  activity: {
+    flex: 1,
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 25,
+    height: 150,
   },
   text: {
     fontFamily: "Outfit_400Regular",

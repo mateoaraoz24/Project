@@ -1,9 +1,8 @@
-import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
-import { useLocalSearchParams, router } from "expo-router";
+import {  Text, StyleSheet, ScrollView } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 
 export default function SocialLesson() {
   const { title, content } = useLocalSearchParams();
-
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={[styles.text, styles.label]}>Mini-lección</Text>
@@ -12,7 +11,6 @@ export default function SocialLesson() {
     </ScrollView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,

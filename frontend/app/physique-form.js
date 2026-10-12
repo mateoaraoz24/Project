@@ -6,7 +6,7 @@ import { Step1Physique } from "../components/Step1-physique";
 import { Step2Physique } from "../components/Step2-physique";
 import { Step3Physique } from "../components/Step3-physique";
 import { Step4Physique } from "../components/Step4-physique";
-import {router} from 'expo-router'
+import { router } from "expo-router";
 import { useUser } from "../context/userProvider";
 export default function PhysiqueForm() {
   const [weight, setWeight] = useState("70");
@@ -38,7 +38,7 @@ export default function PhysiqueForm() {
   };
 
   useEffect(() => {
-    if (loadingUser) return; 
+    if (loadingUser) return;
 
     if (user?.physique) {
       router.replace("/physical");

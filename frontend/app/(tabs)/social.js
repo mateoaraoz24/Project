@@ -10,7 +10,7 @@ import {
   ScrollView,
   Modal,
 } from "react-native";
-import { useFocusEffect, router } from "expo-router";
+import { router } from "expo-router";
 import { apiFetch } from "../../lib/sesion";
 import {
   generateSocialProfile,
@@ -26,13 +26,33 @@ export default function Social() {
   const [profile, setProfile] = useState(null);
   const [daily, setDaily] = useState(null);
   const [monthly, setMonthly] = useState(null);
-
+  const [retryingDaily, setRetryingDaily] = useState(false);
   const [showProfileUpdate, setShowProfileUpdate] = useState(false);
   const [cycleReflection, setCycleReflection] = useState("");
 
   useEffect(() => {
     boot();
   }, []);
+  const retryDaily = async () => {
+    try {
+      setRetryingDaily(true);
+      const generated = await generateDailyChallenge(profile, monthly);
+      if (!generated) throw new Error("No se pudo crear el reto de hoy");
+
+      const dRes = await apiFetch("/social/daily", {
+        method: "POST",
+        body: JSON.stringify(generated),
+      });
+      const dData = await dRes.json();
+      if (!dData.success) throw new Error(dData.message);
+
+      setDaily(dData.data);
+    } catch (e) {
+      Alert.alert("Error", e.message || "No se pudo generar el reto");
+    } finally {
+      setRetryingDaily(false);
+    }
+  };
 
   const shortText = (text, max = 90) => {
     if (!text) return "";
@@ -44,30 +64,30 @@ export default function Social() {
       setLoading(true);
       const response = await apiFetch("/social/today");
       const data = await response.json();
-  
+
       if (!data.success) {
         Alert.alert("Error", data.message || "No se pudo cargar Social");
         return;
       }
-  
+
       if (data.data.needs_onboarding) {
         setNeedsOnboarding(true);
         return;
       }
-  
+
       setNeedsOnboarding(false);
       setProfile(data.data.profile);
-  
+
       let currentMonthly = data.data.monthly;
       let currentDaily = data.data.daily;
-  
+
       if (data.data.needs_monthly) {
         const alreadyHadOne = Boolean(currentMonthly);
 
         if (!alreadyHadOne) {
           const generated = await generateMonthlyChallenge(data.data.profile);
           if (!generated) throw new Error("No se pudo crear el reto mensual");
-  
+
           const mRes = await apiFetch("/social/monthly", {
             method: "POST",
             body: JSON.stringify(generated),
@@ -82,7 +102,7 @@ export default function Social() {
           currentMonthly = null;
         }
       }
-  
+
       if (data.data.needs_daily) {
         const generated = await generateDailyChallenge(
           data.data.profile,
@@ -97,7 +117,7 @@ export default function Social() {
           if (dData.success) currentDaily = dData.data;
         }
       }
-  
+
       setMonthly(currentMonthly);
       setDaily(currentDaily);
     } catch (e) {
@@ -171,7 +191,8 @@ export default function Social() {
       setProfile(pData.data);
 
       const monthlyGen = await generateMonthlyChallenge(pData.data);
-      if (!monthlyGen) throw new Error("No se pudo crear el nuevo reto mensual");
+      if (!monthlyGen)
+        throw new Error("No se pudo crear el nuevo reto mensual");
 
       const mRes = await apiFetch("/social/monthly", {
         method: "POST",
@@ -264,6 +285,23 @@ export default function Social() {
             : "Actualiza tu perfil para continuar"}
         </Text>
       </Pressable>
+      {!daily && monthly && (
+        <View style={styles.card}>
+          <Text style={[styles.text, styles.cardLabel]}>Reto de hoy</Text>
+          <Text style={[styles.text, { color: "#868e96", marginBottom: 12 }]}>
+            No se pudo generar el reto ni la lección
+          </Text>
+          <Pressable
+            onPress={retryDaily}
+            disabled={retryingDaily}
+            style={[styles.button, { opacity: retryingDaily ? 0.6 : 1 }]}
+          >
+            <Text style={[styles.text, styles.buttonText]}>
+              {retryingDaily ? "Generando..." : "Reintentar"}
+            </Text>
+          </Pressable>
+        </View>
+      )}
       {daily && (
         <Pressable
           style={styles.card}
@@ -301,7 +339,9 @@ export default function Social() {
             })
           }
         >
-          <Text style={[styles.text, styles.cardLabel]}>Mini-lección de hoy</Text>
+          <Text style={[styles.text, styles.cardLabel]}>
+            Mini-lección de hoy
+          </Text>
           <Text style={[styles.text, { fontSize: 18 }]}>
             {daily.mini_lesson_title}
           </Text>
@@ -373,7 +413,7 @@ const styles = StyleSheet.create({
   },
   cardLabel: {
     fontSize: 13,
-    color: "#868e96",
+    color: "#1971c2",
     marginBottom: 6,
   },
   input: {

@@ -12,14 +12,15 @@ import { router, Link } from "expo-router";
 import { GoToProfile } from "../../components/GoToProfile";
 import { useFocusEffect } from "@react-navigation/native";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
-import { API_URL } from "../../config/api";
 import { useUser } from "../../context/userProvider";
 import { useTrainStore } from "../../store/trainStore";
+import {apiFetch} from '../../lib/sesion'
 
 export default function Home() {
   const { loadUser } = useUser();
   const activeSession = useTrainStore((state) => state.activeSession);
   const [weekDays, setWeekDays] = useState([]);
+  const [weekStats, setWeekStats] = useState({});
   const [habits, setHabits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [habitsStuck, setHabitsStuck] = useState([]);
@@ -42,38 +43,43 @@ export default function Home() {
       return;
     }
   };
-  const logout = async () => {
-    try {
-      const token = await SecureStore.getItemAsync("access_token");
-      const refreshToken = await SecureStore.getItemAsync("refresh_token");
-      const response = await fetch(`${API_URL}/logout`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          refresh_token: refreshToken,
-        }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        await clearSession();
-        router.replace("/login");
-      } else {
-        alert("Inténtalo nuevamente");
-      }
-    } catch (error) {
-      alert("No se pudo conectar con el servidor");
-    } finally {
-      await clearSession();
-      router.replace("/login");
-    }
-  };
+ 
   const clearSession = async () => {
     await SecureStore.deleteItemAsync("access_token");
     await SecureStore.deleteItemAsync("refresh_token");
     await SecureStore.deleteItemAsync("user_id");
+  };
+  const toDateKey = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+  const dayColor = (completed, total) => {
+    if (!total) return "#000";
+    const progress = (completed / total) * 100;
+    if (progress >= 80) return "#2f9e44";
+    if (progress >= 50) return "#f08c00";
+    return "#e03131";
+  };
+  const buildWeek = () => {
+    const today = new Date();
+    const day = today.getDay();
+    const daysSinceMonday = day === 0 ? 6 : day - 1;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - daysSinceMonday);
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      return {
+        letter: date
+          .toLocaleDateString("es-ES", { weekday: "short" })
+          .charAt(0)
+          .toUpperCase(),
+        number: date.getDate(),
+        date: toDateKey(date),
+      };
+    });
   };
   const getWeekDays = () => {
     const today = new Date();
@@ -99,44 +105,98 @@ export default function Home() {
     }));
     setWeekDays(labels);
   };
-  const toggleHabit = (habit) => {
-    console.log("pressed", habit);
-    if (habitsStuck.includes(habit)) {
-      setHabitsStuck(habitsStuck.filter((d) => d !== habit));
-    } else {
-      setHabitsStuck([...habitsStuck, habit]);
+
+  const toggleHabit = async (habitId) => {
+    habitId = Number(habitId);
+    const todayKey = toDateKey(new Date());
+    const previous = habitsStuck;
+    const next = previous.includes(habitId)
+      ? previous.filter((id) => id !== habitId)
+      : [...previous, habitId];
+
+    setHabitsStuck(next);
+    try {
+      const response = await apiFetch("/habit/toggle", {
+        method: "POST",
+        body: JSON.stringify({
+          habit_id: habitId,
+          date: todayKey,
+        }),
+      });
+  
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setHabitsStuck(previous);
+        console.log("Error al marcar hábito:", data.message);
+        return;
+      }
+      setHabitsStuck((current) => {
+        const isDone = data.data.done;
+
+        if (isDone && !current.includes(habitId)) {
+          return [...current, habitId];
+        }
+
+        if (!isDone) {
+          return current.filter((id) => id !== habitId);
+        }
+
+        return current;
+      });
+      setWeekStats((prev) => ({
+        ...prev,
+        [todayKey]: data.data,
+      }));
+    } catch (e) {
+      setHabitsStuck(previous);
+      console.error("Error de conexión al marcar hábito:", e);
     }
   };
+
   const getHabits = async () => {
     try {
-      const accessToken = await SecureStore.getItemAsync("access_token");
-      const response = await fetch(`${API_URL}/habits`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const days = buildWeek();
+      setWeekDays(days);
+      const todayKey = toDateKey(new Date());
+      const response = await apiFetch(
+        `/habits/home?date=${todayKey}&start=${days[0].date}&end=${days[6].date}`,
+        {
+          method: "GET",
+        }
+      );  
+
       if (response.status === 401) {
         await clearSession();
         router.replace("/login");
         return;
       }
       const data = await response.json();
+      console.log(data);
       setLoading(false);
+
       if (data.success) {
-        setHabits(data.data);
+        setHabits(data.data.habits);
+
+        setHabitsStuck(
+          data.data.habits
+            .filter((item) => item.done)
+            .map((item) => Number(item.id))
+        );
+        const stats = {};
+        data.data.week.forEach((item) => {
+          stats[item.date] = item;
+        });
+        setWeekStats(stats);
       } else {
         console.log(data.message);
       }
     } catch (error) {
-      console.log("No se pudo conectar con el servidor");
+      console.log("No se pudo conectar con el servidor", error);
       setLoading(false);
     }
   };
   const progress =
     habits.length === 0 ? 0 : (habitsStuck.length / habits.length) * 100;
-  const today = new Date().getDate();
   useEffect(() => {
     const init = async () => {
       await verifySession();
@@ -266,33 +326,32 @@ export default function Home() {
       </View>
       <View style={styles.week}>
         <View style={styles.days}>
-          {weekDays.map((day, index) => (
-            <View
-              key={`letter-${index}`}
-              style={[
-                styles.textDayContainer,
-                day.number === today && styles.todayContainer,
-              ]}
-            >
+          {weekDays.map((day, index) => {
+            const todayKey = toDateKey(new Date());
+            const isToday = day.date === todayKey;
+            const stat = weekStats[day.date];
+            const completed = isToday ? habitsStuck.length : stat?.completed;
+            const total = isToday ? habits.length : stat?.total;
+            const hasRecord = isToday ? habits.length > 0 : Boolean(stat);
+            return (
               <Text
+                key={`${day.date}-${index}`}
                 style={[
                   styles.textDay,
-                  styles.letter,
-                  day.number === today && styles.today,
+                  styles.numberDays,
+                  {
+                    borderColor: hasRecord
+                      ? dayColor(completed, total)
+                      : "#000",
+                  },
                 ]}
               >
-                {day.letter}
+                {day.number}
               </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
-        <View style={styles.days}>
-          {weekDays.map((day) => (
-            <Text style={[styles.textDay, styles.numberDays]} key={day.number}>
-              {day.number}
-            </Text>
-          ))}
-        </View>
+
         <Text style={{ fontFamily: "Outfit_400Regular", color: "#15aabf" }}>
           Continúa construyendo tu disciplina
         </Text>
