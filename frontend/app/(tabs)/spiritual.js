@@ -1,4 +1,4 @@
-import {useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   Pressable,
   Text,
@@ -28,7 +28,9 @@ export default function Spiritual() {
 
       const prefRes = await apiFetch("/spiritual/verse/preference");
       const prefData = await prefRes.json();
-      const wants = prefData?.success ? !!prefData.data.wants_daily_verse : false;
+      const wants = prefData?.success
+        ? !!prefData.data.wants_daily_verse
+        : false;
       setEnabled(wants);
 
       if (wants) {
@@ -82,7 +84,7 @@ export default function Spiritual() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#9c36b5" />
+        <ActivityIndicator size="large" color="#2f9e44" />
         <Text style={[styles.text, { marginTop: 12, color: "#868e96" }]}>
           Cargando...
         </Text>
@@ -92,7 +94,6 @@ export default function Spiritual() {
   return (
     <View style={styles.container}>
       <Text style={[styles.text, { fontSize: 55 }]}>Espiritual</Text>
-
       <View style={styles.prefRow}>
         <Text style={[styles.text, { fontSize: 16, flex: 1 }]}>
           Versículo del día
@@ -101,20 +102,29 @@ export default function Spiritual() {
           value={enabled}
           onValueChange={toggleVerse}
           disabled={updating}
-          trackColor={{ false: "#ced4da", true: "#d0bfff" }}
-          thumbColor={enabled ? "#9c36b5" : "#f8f9fa"}
+          trackColor={{ false: "#ced4da", true: "#b2f2bb" }}
+          thumbColor={enabled ? "#2f9e44" : "#f8f9fa"}
         />
       </View>
-
       {enabled && verse && (
         <View style={styles.verseCard}>
           <Text style={[styles.text, { fontSize: 13, color: "#868e96" }]}>
             Versículo del día
           </Text>
-          <Text style={[styles.text, { fontSize: 16, marginTop: 8, lineHeight: 24 }]}>
+          <Text
+            style={[
+              styles.text,
+              { fontSize: 16, marginTop: 8, lineHeight: 24 },
+            ]}
+          >
             "{verse.text}"
           </Text>
-          <Text style={[styles.text, { fontSize: 14, color: "#9c36b5", marginTop: 10 }]}>
+          <Text
+            style={[
+              styles.text,
+              { fontSize: 14, color: "#9c36b5", marginTop: 10 },
+            ]}
+          >
             {verse.reference}
           </Text>
         </View>
@@ -125,34 +135,32 @@ export default function Spiritual() {
           No hay versículo disponible todavía.
         </Text>
       )}
-
       <Pressable
-        style={[styles.button, { borderColor: "#9c36b5" }]}
+        style={[styles.button, { borderColor: "#2f9e44" }]}
+        onPress={() => router.push("/meditations")}
+      >
+        <Text
+          style={[
+            styles.text,
+            { fontSize: 20, textAlign: "center", color: "#2f9e44" },
+          ]}
+        >
+          Ir a meditaciones
+        </Text>
+      </Pressable>
+      <Pressable
+        style={[styles.button, { borderColor: "#2f9e44" }]}
         onPress={() => router.push("/journal")}
       >
         <Text
           style={[
             styles.text,
-            { fontSize: 20, textAlign: "center", color: "#9c36b5" },
+            { fontSize: 20, textAlign: "center", color: "#2f9e44" },
           ]}
         >
           Ir al diario
         </Text>
       </Pressable>
-
-      {/* <Pressable
-        style={[styles.button, { borderColor: "#e03131", marginTop: 10 }]}
-        onPress={logout}
-      >
-        <Text
-          style={[
-            styles.text,
-            { fontSize: 20, textAlign: "center", color: "#e03131" },
-          ]}
-        >
-          Logout
-        </Text>
-      </Pressable> */}
     </View>
   );
 }
@@ -161,7 +169,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: "center",
-    gap: 10,
+    gap: 15,
     paddingHorizontal: 15,
     backgroundColor: "#fff",
   },

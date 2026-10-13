@@ -61,6 +61,7 @@ export default function Mental() {
           data={books}
           keyExtractor={(item) => item.id.toString()}
           style={{ maxHeight: 350 }}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <Pressable
               onPress={() =>

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   FlatList,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { useState, useEffect, useCallback } from "react";
 import * as SecureStore from "expo-secure-store";
@@ -14,7 +15,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
 import { useUser } from "../../context/userProvider";
 import { useTrainStore } from "../../store/trainStore";
-import {apiFetch} from '../../lib/sesion'
+import { apiFetch } from "../../lib/sesion";
 
 export default function Home() {
   const { loadUser } = useUser();
@@ -29,21 +30,21 @@ export default function Home() {
     if (!token) {
       await clearSession();
       router.replace("/login");
-      return;
+      return false;
     }
     const result = await loadUser();
-    console.log(result);
     if (!result.success) {
       if (result.status === 401) {
         await clearSession();
         router.replace("/login");
-        return;
+        return false;
       }
       Alert.alert("Error", result.message);
-      return;
+      return false;
     }
+    return true;
   };
- 
+
   const clearSession = async () => {
     await SecureStore.deleteItemAsync("access_token");
     await SecureStore.deleteItemAsync("refresh_token");
@@ -81,30 +82,6 @@ export default function Home() {
       };
     });
   };
-  const getWeekDays = () => {
-    const today = new Date();
-    const day = today.getDay();
-    const daysSinceMonday = day === 0 ? 6 : day - 1;
-
-    const monday = new Date(today);
-    monday.setDate(today.getDate() - daysSinceMonday);
-
-    const days = [];
-
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + i);
-      days.push(date);
-    }
-    const labels = days.map((date) => ({
-      letter: date
-        .toLocaleDateString("es-ES", { weekday: "short" })
-        .charAt(0)
-        .toUpperCase(),
-      number: date.getDate(),
-    }));
-    setWeekDays(labels);
-  };
 
   const toggleHabit = async (habitId) => {
     habitId = Number(habitId);
@@ -123,7 +100,7 @@ export default function Home() {
           date: todayKey,
         }),
       });
-  
+
       const data = await response.json();
       if (!response.ok || !data.success) {
         setHabitsStuck(previous);
@@ -163,7 +140,7 @@ export default function Home() {
         {
           method: "GET",
         }
-      );  
+      );
 
       if (response.status === 401) {
         await clearSession();
@@ -173,10 +150,8 @@ export default function Home() {
       const data = await response.json();
       console.log(data);
       setLoading(false);
-
       if (data.success) {
         setHabits(data.data.habits);
-
         setHabitsStuck(
           data.data.habits
             .filter((item) => item.done)
@@ -197,18 +172,27 @@ export default function Home() {
   };
   const progress =
     habits.length === 0 ? 0 : (habitsStuck.length / habits.length) * 100;
-  useEffect(() => {
-    const init = async () => {
-      await verifySession();
-      getWeekDays();
-    };
-    init();
-  }, []);
   useFocusEffect(
     useCallback(() => {
-      getHabits();
+      const loadAll = async () => {
+        setLoading(true);
+        const sessionOk = await verifySession();
+        if (sessionOk) {
+          await getHabits();
+        }
+        setLoading(false);
+      };
+      loadAll();
     }, [])
   );
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#f08c00" />
+        <Text style={styles.loadingText}>Cargando tu progreso...</Text>
+      </View>
+    );
+  }
   return (
     <View style={styles.container}>
       <GoToProfile />
@@ -227,101 +211,91 @@ export default function Home() {
       )}
 
       <View style={styles.habitContainer}>
-        {loading ? (
-          <View>
-            <Text style={styles.empty}>Cargango habitos ...</Text>
-          </View>
-        ) : (
-          <>
-            <View
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                gap: 100,
-              }}
-            >
-              {habits.length > 0 && (
-                <>
-                  <Text
-                    style={{
-                      color: "#9c36b5",
-                      fontSize: 18,
-                      fontFamily: "Outfit_400Regular",
-                    }}
-                  >
-                    Misión del día
-                  </Text>
-                  <Link href="/add-habit" style={styles.addHabits}>
-                    + añadir hábito
-                  </Link>
-                </>
-              )}
-            </View>
-            <View style={styles.habits}>
-              <FlatList
-                data={habits}
-                keyExtractor={(item) => item.id.toString()}
-                showsVerticalScrollIndicator={true}
-                numColumns={2}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.empty}>
-                      Aún no tienes hábitos, inicia con el primero
-                    </Text>
-                    <Link href="/add-habit" style={styles.addHabits}>
-                      + añadir hábito
-                    </Link>
-                  </View>
-                }
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={styles.habit}
-                    onPress={() => toggleHabit(item.id)}
-                  >
-                    <View
-                      style={[
-                        styles.checkbox,
-                        !habitsStuck.includes(item.id) &&
-                          styles.habitUnselected,
-                      ]}
-                    >
-                      {habitsStuck.includes(item.id) && (
-                        <FontAwesome6 name="check" size={25} color="#2f9e44" />
-                      )}
-                    </View>
-
-                    <Text
-                      style={{
-                        width: 100,
-                        fontSize: 18,
-                        fontFamily: "Outfit_400Regular",
-                      }}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {item.name}
-                    </Text>
-                  </Pressable>
-                )}
-              />
-            </View>
-            {habits.length > 0 && (
+        <View
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            gap: 100,
+          }}
+        >
+          {habits.length > 0 && (
+            <>
               <Text
                 style={{
-                  textAlign: "center",
-                  color:
-                    progress >= 80
-                      ? "#2f9e44"
-                      : progress >= 50
-                      ? "#f08c00"
-                      : "#e03131",
+                  color: "#9c36b5",
                   fontSize: 18,
+                  fontFamily: "Outfit_400Regular",
                 }}
               >
-                {habitsStuck.length}/{habits.length} hábitos completados
+                Misión del día
               </Text>
+              <Link href="/add-habit" style={styles.addHabits}>
+                + añadir hábito
+              </Link>
+            </>
+          )}
+        </View>
+        <View style={styles.habits}>
+          <FlatList
+            data={habits}
+            keyExtractor={(item) => item.id.toString()}
+            showsVerticalScrollIndicator={true}
+            numColumns={2}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.empty}>
+                  Aún no tienes hábitos, inicia con el primero
+                </Text>
+                <Link href="/add-habit" style={styles.addHabits}>
+                  + añadir hábito
+                </Link>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                style={styles.habit}
+                onPress={() => toggleHabit(item.id)}
+              >
+                <View
+                  style={[
+                    styles.checkbox,
+                    !habitsStuck.includes(item.id) && styles.habitUnselected,
+                  ]}
+                >
+                  {habitsStuck.includes(item.id) && (
+                    <FontAwesome6 name="check" size={25} color="#2f9e44" />
+                  )}
+                </View>
+                <Text
+                  style={{
+                    width: 100,
+                    fontSize: 18,
+                    fontFamily: "Outfit_400Regular",
+                  }}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {item.name}
+                </Text>
+              </Pressable>
             )}
-          </>
+          />
+        </View>
+        {habits.length > 0 && (
+          <Text
+            style={{
+              textAlign: "center",
+              color:
+                progress >= 80
+                  ? "#2f9e44"
+                  : progress >= 50
+                  ? "#f08c00"
+                  : "#e03131",
+              fontSize: 18,
+            }}
+          >
+            {habitsStuck.length}/{habits.length} hábitos completados
+          </Text>
         )}
       </View>
       <View style={styles.week}>
@@ -466,5 +440,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#ced4da",
     borderRadius: 15,
     marginLeft: 10,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    gap: 16,
   },
 });

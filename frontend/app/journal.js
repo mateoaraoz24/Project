@@ -63,7 +63,6 @@ export default function Journal() {
       console.log(e);
     }
   };
-
   const loadJournal = async (dateKey) => {
     setLoading(true);
     try {
@@ -216,7 +215,7 @@ export default function Journal() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#9c36b5" />
+        <ActivityIndicator size="large" color="#2f9e44" />
         <Text style={[styles.text, { marginTop: 12, color: "#868e96" }]}>
           Cargando diario...
         </Text>
@@ -229,7 +228,7 @@ export default function Journal() {
       style={styles.container}
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
     >
-      <Text style={[styles.text, { fontSize: 32, fontWeight: "700" }]}>
+      <Text style={[styles.text, { fontSize: 48 }]}>
         Diario
       </Text>
       <View style={styles.dateRow}>
@@ -273,15 +272,15 @@ export default function Journal() {
         style={[
           styles.button,
           {
-            borderColor: recording ? "#e03131" : "#9c36b5",
+            borderColor: recording ? "#e03131" : "#2f9e44",
             opacity: transcribing ? 0.6 : 1,
           },
         ]}
       >
         {transcribing ? (
           <View style={styles.row}>
-            <ActivityIndicator color="#9c36b5" />
-            <Text style={[styles.text, styles.buttonText, { color: "#9c36b5" }]}>
+            <ActivityIndicator color="#2f9e44" />
+            <Text style={[styles.text, styles.buttonText, { color: "#2f9e44" }]}>
               Transcribiendo...
             </Text>
           </View>
@@ -290,14 +289,13 @@ export default function Journal() {
             style={[
               styles.text,
               styles.buttonText,
-              { color: recording ? "#e03131" : "#9c36b5" },
+              { color: recording ? "#e03131" : "#2f9e44" },
             ]}
           >
             {recording ? "Detener grabación" : "Grabar audio"}
           </Text>
         )}
       </Pressable>
-
       <Pressable
         onPress={save}
         disabled={saving || deleting || !text.trim()}

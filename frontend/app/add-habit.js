@@ -8,7 +8,6 @@ import {
 } from "react-native";
 import { useState} from "react";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
-import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
 import {apiFetch} from '../lib/sesion'
 
@@ -72,11 +71,6 @@ export default function AddHabit() {
     } finally {
       setLoading(false);
     }
-  };
-  const clearSession = async () => {
-    await SecureStore.deleteItemAsync("access_token");
-    await SecureStore.deleteItemAsync("refresh_token");
-    await SecureStore.deleteItemAsync("user_id");
   };
   return (
     <View style={styles.container}>
